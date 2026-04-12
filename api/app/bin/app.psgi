@@ -125,6 +125,8 @@ use Finance::Quote;
     if ($CURRENCYFREAKS_API_KEY) {
         push @quoter_args, 'CurrencyFreaks', { API_KEY => $CURRENCYFREAKS_API_KEY };
     }
+    
+    # Set currency BEFORE creating the quoter object
     if ($FQ_CURRENCY) {
         $ENV{'FQ_CURRENCY'} = $FQ_CURRENCY;
     }
@@ -493,19 +495,26 @@ use Finance::Quote;
                 my $from = $tool_args->{from} // '';
                 my $to = $tool_args->{to} // '';
                 
-                my $cache_key = "mcp:currency:${from}:${to}";
+                my $cache_key = "currency:${from}:${to}";
                 my $cached = FQCache::get($cache_key);
                 if ($cached) {
-                    my $data = _extract_mcp_data($cached);
-                    return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($data) }] });
+                    # Cached response is [status_code, headers, body_array]
+                    my $body = $cached->[2][0];
+                    my $parsed = decode_json($body);
+                    my $rate_data = $parsed->{data};
+                    return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($rate_data) }] });
                 }
                 
-                # Try to get rate using existing logic
-                my $rate = _get_currency_rate($from, $to);
-                if ($rate) {
-                    my $response_data = { from => $from, to => $to, rate => $rate };
-                    FQCache::set($cache_key, $response_data);
-                    return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($response_data) }] });
+                # Call handle_currency directly
+                my $response = handle_currency($from, $to, {});
+                
+                # Cache the response for next time
+                if ($response->[0] == 200) {
+                    FQCache::set($cache_key, $response);
+                    my $body = $response->[2][0];
+                    my $parsed = decode_json($body);
+                    my $rate_data = $parsed->{data};
+                    return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($rate_data) }] });
                 }
                 
                 return jsonrpc_error($id, -32001, "Currency conversion failed", "Cannot convert $from to $to");
