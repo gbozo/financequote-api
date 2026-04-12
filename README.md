@@ -4,6 +4,7 @@
   <img src="https://img.shields.io/badge/Perl-5.36+-39459f?style=flat&logo=perl&logoColor=white" alt="Perl">
   <img src="https://img.shields.io/badge/Docker-Ready-2496ed?style=flat&logo=docker&logoColor=white">
   <img src="https://img.shields.io/badge/REST-API-green?style=flat">
+  <img src="https://img.shields.io/badge/MCP-Agent--Ready-purple?style=flat">
   <img src="https://img.shields.io/badge/License-MIT-yellowgreen?style=flat">
 </p>
 
@@ -11,13 +12,32 @@
 
 Universal financial data API - stocks, forex, crypto via 45+ providers - Docker Compose build and container.
 
+- **REST API** — Simple HTTP endpoints for quotes, currency conversion, and more
+- **MCP Protocol** — Built-in Model Context Protocol endpoint for AI agents and LLMs
+
 Made with love and patience, your friend George.
+
+## ⚡ Quick Install (Copy & Deploy)
+
+```bash
+# One command to start
+docker compose -f docker-compose.yaml up -d
+
+# Or with custom configuration
+docker compose -f docker-compose.yaml up -d -e FQ_CURRENCY=EUR -e API_AUTH_KEYS=mykey
+```
+
+The API runs on **http://localhost:3001** — test it immediately:
+```bash
+curl http://localhost:3001/api/v1/health
+```
 
 ## ✨ Features
 
 - 🚀 **45+ Data Sources** — Yahoo Finance, AlphaVantage, Twelve Data, European exchanges, and more
 - 🌍 **Global Markets** — US, Europe, Asia, Australia, India, and more
 - 💱 **Currency Conversion** — Real-time exchange rates from multiple providers
+- 🤖 **MCP Protocol** — AI agent-ready endpoint for programmatic access
 - 🔐 **Optional API Key Authentication** — Secure your API with Bearer token auth
 - 🐳 **Docker-Ready** — Single command to spin up the entire stack
 - 📚 **Interactive Documentation** — Built-in API explorer and tester
@@ -25,28 +45,7 @@ Made with love and patience, your friend George.
 
 ## 🎯 Quick Start
 
-### ⚡ One-Command Start (Recommended)
-
-```bash
-# Just run this - pulls image from GitHub Container Registry
-docker compose -f docker-compose.yaml up -d
-
-# Access the API
-curl http://localhost:3001/api/v1/health
-```
-
-### 🛠️ From Source (Development)
-
-```bash
-# Clone the repo
-git clone https://github.com/gbozo/financequote-api.git
-cd financequote-api
-
-# Build and run
-docker compose -f docker/docker-compose.yaml up -d --build
-```
-
-### 2. Use the API
+### Use the API
 
 ```bash
 # Get a stock quote
@@ -62,7 +61,7 @@ curl "http://localhost:3001/api/v1/methods"
 curl "http://localhost:3001/api/v1/currency/USD/EUR"
 ```
 
-### 3. Open Interactive Docs
+### Open Interactive Docs
 
 Visit **http://localhost:3001** in your browser for:
 - Complete API documentation
@@ -78,6 +77,54 @@ Visit **http://localhost:3001** in your browser for:
 | `GET /api/v1/methods` | List available sources | — |
 | `GET /api/v1/fetch/:method/:symbols` | Use specific source | `/api/v1/fetch/yahoojson/AAPL` |
 | `GET /api/v1/health` | Health check | — |
+| `POST /mcp` | MCP Protocol (JSON-RPC 2.0) | See MCP section below |
+
+### MCP Protocol (for AI Agents)
+
+The MCP endpoint (`POST /mcp`) allows AI agents and LLMs to access quote data via JSON-RPC 2.0:
+
+```bash
+# Initialize connection
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+
+# List available tools
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+
+# Get a stock quote
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":3,
+    "method":"tools/call",
+    "params":{
+      "name":"get_quote",
+      "arguments":{"symbols":"AAPL,MSFT"}
+    }
+  }'
+
+# Get currency rate
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":4,
+    "method":"tools/call",
+    "params":{
+      "name":"get_currency",
+      "arguments":{"from":"USD","to":"EUR"}
+    }
+  }'
+```
+
+**Available MCP Tools:**
+- `get_quote` — Fetch stock/ETF quotes (params: symbols, method, currency)
+- `get_currency` — Exchange rate conversion (params: from, to)
+- `list_methods` — Show all available quote methods
 
 ### Query Parameters
 

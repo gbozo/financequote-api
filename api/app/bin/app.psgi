@@ -356,6 +356,249 @@ use Finance::Quote;
         FQCache::set($cache_key, $response);
         return $response;
     }
+
+    # ============================================
+    # MCP Protocol Handler (Model Context Protocol)
+    # ============================================
+    
+    sub handle_mcp {
+        my ($body) = @_;
+        
+        # Parse JSON-RPC 2.0 request
+        my $req;
+        eval { $req = decode_json($body); };
+        if ($@ || !$req) {
+            return json_error_response(-32700, "Parse error", "Invalid JSON");
+        }
+        
+        my $jsonrpc = $req->{jsonrpc} // '';
+        my $id = $req->{id};
+        my $method = $req->{method};
+        my $params = $req->{params} // {};
+        
+        unless ($jsonrpc eq '2.0') {
+            return json_error_response(-32600, "Invalid Request", "jsonrpc must be '2.0'");
+        }
+        
+        # Handle MCP methods
+        if ($method eq 'initialize') {
+            return jsonrpc_response($id, {
+                protocolVersion => '2024-11-05',
+                capabilities => {
+                    tools => {},
+                },
+                serverInfo => {
+                    name => 'FinanceQuote',
+                    version => '1.69',
+                },
+            });
+        }
+        
+        if ($method eq 'tools/list') {
+            return jsonrpc_response($id, {
+                tools => [
+                    {
+                        name => 'get_quote',
+                        description => 'Fetch stock, ETF, or other financial quotes from various sources',
+                        inputSchema => {
+                            type => 'object',
+                            properties => {
+                                symbols => {
+                                    type => 'string',
+                                    description => 'Comma-separated list of symbols (e.g., AAPL,MSFT,GOOGL)',
+                                },
+                                method => {
+                                    type => 'string',
+                                    description => 'Quote method to use (default: yahoojson)',
+                                },
+                                currency => {
+                                    type => 'string',
+                                    description => 'Desired currency code (e.g., USD, EUR)',
+                                },
+                            },
+                            required => ['symbols'],
+                        },
+                    },
+                    {
+                        name => 'get_currency',
+                        description => 'Get currency exchange rate between two currencies',
+                        inputSchema => {
+                            type => 'object',
+                            properties => {
+                                from => {
+                                    type => 'string',
+                                    description => 'Source currency code (e.g., USD)',
+                                },
+                                to => {
+                                    type => 'string',
+                                    description => 'Target currency code (e.g., EUR)',
+                                },
+                            },
+                            required => ['from', 'to'],
+                        },
+                    },
+                    {
+                        name => 'list_methods',
+                        description => 'List all available quote fetch methods',
+                        inputSchema => {
+                            type => 'object',
+                            properties => {},
+                        },
+                    },
+                ],
+            });
+        }
+        
+        if ($method eq 'tools/call') {
+            my $tool_name = $params->{name};
+            my $tool_args = $params->{arguments} // {};
+            
+            if ($tool_name eq 'get_quote') {
+                my $symbols = $tool_args->{symbols} // '';
+                my $method = $tool_args->{method} // 'yahoojson';
+                my $currency = $tool_args->{currency} // '';
+                
+                # Build cache key
+                my $cache_key = "mcp:quote:${symbols}:${method}:${currency}";
+                my $cached = FQCache::get($cache_key);
+                if ($cached) {
+                    # Extract data from cached response and wrap in MCP format
+                    my $data = _extract_mcp_data($cached);
+                    return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($data) }] });
+                }
+                
+                # Fetch quote
+                my @syms = split(/,/, $symbols);
+                $quoter->{currency} = $currency if $currency;
+                my %quotes = $quoter->fetch($method, @syms);
+                
+                my %result;
+                foreach my $sym (@syms) {
+                    foreach my $key (keys %quotes) {
+                        my ($s, $attr) = split(/$;/, $key, 2);
+                        next unless $s eq $sym;
+                        $result{$sym}{$attr} = $quotes{$key};
+                    }
+                    unless ($result{$sym}) {
+                        $result{$sym} = { symbol => $sym, success => 0, errormsg => 'No data returned' };
+                    }
+                }
+                
+                my $response_data = { symbols => \%result };
+                FQCache::set($cache_key, $response_data);
+                return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($response_data) }] });
+            }
+            
+            if ($tool_name eq 'get_currency') {
+                my $from = $tool_args->{from} // '';
+                my $to = $tool_args->{to} // '';
+                
+                my $cache_key = "mcp:currency:${from}:${to}";
+                my $cached = FQCache::get($cache_key);
+                if ($cached) {
+                    my $data = _extract_mcp_data($cached);
+                    return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($data) }] });
+                }
+                
+                # Try to get rate using existing logic
+                my $rate = _get_currency_rate($from, $to);
+                if ($rate) {
+                    my $response_data = { from => $from, to => $to, rate => $rate };
+                    FQCache::set($cache_key, $response_data);
+                    return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($response_data) }] });
+                }
+                
+                return jsonrpc_error($id, -32001, "Currency conversion failed", "Cannot convert $from to $to");
+            }
+            
+            if ($tool_name eq 'list_methods') {
+                my @methods = @Finance::Quote::MODULES;
+                return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json({ methods => \@methods }) }] });
+            }
+            
+            return jsonrpc_error($id, -32601, "Method not found", "Unknown tool: $tool_name");
+        }
+        
+        return jsonrpc_error($id, -32601, "Method not found", "Unknown method: $method");
+    }
+    
+    sub _extract_mcp_data {
+        my ($cached) = @_;
+        # Handle both array ref (cached response) and hash
+        if (ref($cached) eq 'ARRAY') {
+            return $cached->[0][3][0];  # This is simplistic - assumes cached response format
+        }
+        return $cached;
+    }
+    
+    sub _get_currency_rate {
+        my ($from, $to) = @_;
+        
+        if ($ALPHAVANTAGE_API_KEY) {
+            my @pairs = ("$from$to");
+            my %quotes = $quoter->fetch('alphavantage', @pairs);
+            my $rate;
+            foreach my $k (keys %quotes) {
+                my $v = $quotes{$k};
+                if (ref($v) eq 'HASH') {
+                    $rate = $v->{close} || $v->{last} || $v->{rate};
+                } elsif (!ref($v) && $v =~ /^-?[\d.]+$/) {
+                    $rate = $v;
+                }
+                last if $rate;
+            }
+            return $rate + 0 if $rate && $rate =~ /^-?[\d.]+$/;
+        }
+        
+        my @pairs = ("$from$to");
+        my %quotes = $quoter->fetch('yahoojson', @pairs);
+        my $rate;
+        foreach my $k (keys %quotes) {
+            my $v = $quotes{$k};
+            if (ref($v) eq 'HASH' && $v->{success}) {
+                $rate = $v->{close} || $v->{last};
+                last if $rate;
+            } elsif (!ref($v) && $v =~ /^-?[\d.]+$/) {
+                $rate = $v;
+                last if $rate;
+            }
+        }
+        
+        unless ($rate) {
+            %quotes = $quoter->fetch('Currencies', @pairs);
+            my $key = "${from}${to}";
+            my $v = $quotes{$key};
+            if (ref($v) eq 'HASH') {
+                $rate = $v->{last} || $v->{rate};
+            } elsif (!ref($v) && $v =~ /^-?[\d.]+$/) {
+                $rate = $v;
+            }
+        }
+        
+        return $rate + 0 if $rate && $rate =~ /^-?[\d.]+$/;
+        return undef;
+    }
+    
+    sub jsonrpc_response {
+        my ($id, $result) = @_;
+        my $ts = get_timestamp();
+        my $json_text = '{"jsonrpc":"2.0","id":' . (defined $id ? $id : 'null') . ',"result":' . encode_json($result) . ',"timestamp":"' . $ts . '"}';
+        return [ 200, [ 'Content-Type' => 'application/json', 'Access-Control-Allow-Origin' => '*' ], [ $json_text ] ];
+    }
+    
+    sub jsonrpc_error {
+        my ($id, $code, $message, $data) = @_;
+        my $ts = get_timestamp();
+        my $json_text = '{"jsonrpc":"2.0","id":' . (defined $id ? $id : 'null') . ',"error":{"code":' . $code . ',"message":"' . $message . '","data":"' . ($data // '') . '"},"timestamp":"' . $ts . '"}';
+        return [ 200, [ 'Content-Type' => 'application/json', 'Access-Control-Allow-Origin' => '*' ], [ $json_text ] ];
+    }
+    
+    sub json_error_response {
+        my ($code, $message, $data) = @_;
+        my $ts = get_timestamp();
+        my $json_text = '{"jsonrpc":"2.0","id":null,"error":{"code":' . $code . ',"message":"' . $message . '","data":"' . ($data // '') . '"},"timestamp":"' . $ts . '"}';
+        return [ 200, [ 'Content-Type' => 'application/json', 'Access-Control-Allow-Origin' => '*' ], [ $json_text ] ];
+    }
 }
 
 # ============================================
@@ -429,8 +672,18 @@ sub {
     }
     
     # Route: /api/v1/fetch/:method/:symbols
-    if ($path =~ m{^/api/v1/fetch/([^/]+)/([^/]+)$}) {
+    if ($path eq '/api/v1/fetch/([^/]+)/([^/]+)$') {
         return FQAPI::handle_fetch($1, $2, \%params);
+    }
+    
+    # MCP Protocol endpoint (JSON-RPC 2.0)
+    if ($path eq '/mcp' && $method eq 'POST') {
+        my $content_length = $env->{CONTENT_LENGTH} // 0;
+        my $body = '';
+        if ($content_length > 0) {
+            $env->{'psgi.input'}->read($body, $content_length);
+        }
+        return FQAPI::handle_mcp($body);
     }
     
     # Serve static files (documentation)
