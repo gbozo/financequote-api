@@ -17,6 +17,18 @@ Universal financial data API - stocks, forex, crypto via 45+ providers - Docker 
 
 Made with love and patience, your friend George.
 
+## 🖥️ OpenWebUI Integration
+
+Connect FinanceQuote to OpenWebUI (or any LLM frontend that supports MCP) for natural language queries:
+
+<p align="center">
+  <img src="openwebui-mcp.jpeg" alt="OpenWebUI MCP Configuration" width="600"/>
+</p>
+
+<p align="center">
+  <img src="openwebui-chat.jpeg" alt="OpenWebUI Chat Example" width="600"/>
+</p>
+
 ## ⚡ Quick Install (Copy & Deploy)
 
 ```bash
