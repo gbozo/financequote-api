@@ -56,9 +56,9 @@ jobs:
       - name: Create Release Asset
         if: github.event_name == 'release'
         run: |
+          mkdir -p release
           TAG="${{ github.ref_name }}"
           sed "s|ghcr.io/.*/financequote-api:latest|ghcr.io/${{ github.repository }}:${TAG}|g" docker-compose.yaml > "release/docker-compose.yaml"
-          mkdir -p release
 
       - name: Upload Release Assets
         if: github.event_name == 'release'
