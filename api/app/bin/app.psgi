@@ -156,24 +156,77 @@ use Finance::Quote;
         return json_response('success', \%result);
     }
 
-    # 4. Currency Conversion
+# 4. Currency Conversion
     sub handle_currency {
         my ($from, $to, $params) = @_;
         
         # For currency, we can try alphavantage (needs API key) or other methods
-        # First, let's check if we have AlphaVantage configured for currencies
         if ($ALPHAVANTAGE_API_KEY) {
-            # Use alphavantage with currency endpoint
             my @pairs = ("$from$to");
             my %quotes = $quoter->fetch('alphavantage', @pairs);
             
             my $rate;
             foreach my $k (keys %quotes) {
-                if ($k =~ /^${from}/i) {
-                    # Check if conversion happened (from -> to)
-                    $rate = $quotes{$k}{close} || $quotes{$k}{last} || $quotes{$k}{rate};
+                my $v = $quotes{$k};
+                # Handle both hash ref and string values
+                if (ref($v) eq 'HASH') {
+                    $rate = $v->{close} || $v->{last} || $v->{rate};
+                } elsif (!ref($v) && $v =~ /^-?[\d.]+$/) {
+                    $rate = $v;
+                }
+                last if $rate;
+            }
+            
+            if ($rate && $rate =~ /^-?[\d.]+$/) {
+                return json_response('success', {
+                    from => $from,
+                    to   => $to,
+                    rate => $rate + 0,
+                });
+            }
+        }
+        
+        # Fallback: Try general approach with FQ_CURRENCY setting
+        my @pairs = ("$from$to");
+        my %quotes = $quoter->fetch('yahoojson', @pairs);
+        
+        my $rate;
+        foreach my $k (keys %quotes) {
+            my $v = $quotes{$k};
+            if (ref($v) eq 'HASH' && $v->{success}) {
+                my $got_currency = $v->{currency} // '';
+                if ($got_currency eq $to || $v->{last}) {
+                    $rate = $v->{close} || $v->{last};
                     last if $rate;
                 }
+            } elsif (!ref($v) && $v =~ /^-?[\d.]+$/) {
+                $rate = $v;
+                last if $rate;
+            }
+        }
+        
+        # Try Currencies module as fallback
+        unless ($rate) {
+            %quotes = $quoter->fetch('Currencies', @pairs);
+            my $key = "${from}${to}";
+            my $v = $quotes{$key};
+            if (ref($v) eq 'HASH') {
+                $rate = $v->{last} || $v->{rate};
+            } elsif (!ref($v) && $v =~ /^-?[\d.]+$/) {
+                $rate = $v;
+            }
+        }
+        
+        if ($rate && $rate =~ /^-?[\d.]+$/) {
+            return json_response('success', {
+                from => $from,
+                to   => $to,
+                rate => $rate + 0,
+            });
+        } else {
+            return error_response(400, "Cannot convert $from to $to", "Exchange rate not available. Try setting ALPHAVANTAGE_API_KEY.");
+        }
+    }
             }
             
             if ($rate && $rate =~ /^-?[\d.]+$/) {
