@@ -119,19 +119,40 @@ use Finance::Quote;
     sub handle_currency {
         my ($from, $to, $params) = @_;
         
-        my @syms = ("$from$to");
-        my %quotes = $quoter->currency_lookup(@syms);
+        # Try to get currency rate using YahooJSON (supports some pairs)
+        # Finance::Quote can fetch currencies via various methods
+        my @pairs = ("$from$to");
         
-        my $rate = $quotes{"${from}${to}", "last"} || $quotes{"${from}${to}", "rate"};
+        # Try fetching currency via a stock quote approach (some sources support it)
+        my %quotes = $quoter->fetch('yahoojson', @pairs);
         
-        if ($rate) {
+        my $rate;
+        # Check various key formats returned by different modules
+        my $key = "${from}${to}";
+        
+        # Try different key formats
+        foreach my $k (keys %quotes) {
+            if ($k =~ /^${from}$to$/i || $k =~ /^${from}.*$to$/i) {
+                $rate = $quotes{$k}{last} || $quotes{$k}{rate} || $quotes{$k};
+                last if $rate;
+            }
+        }
+        
+        # If not found, try currency specific modules
+        unless ($rate) {
+            # Try fetching from Currencies module
+            %quotes = $quoter->fetch('Currencies', @pairs);
+            $rate = $quotes{$key}{last} || $quotes{$key}{rate};
+        }
+        
+        if ($rate && $rate =~ /^-?[\d.]+$/) {
             return json_response('success', {
                 from => $from,
                 to   => $to,
-                rate => $rate,
+                rate => $rate + 0,
             });
         } else {
-            return error_response(400, "Cannot convert $from to $to", "Exchange rate not available");
+            return error_response(400, "Cannot convert $from to $to", "Exchange rate not available. Currency conversion requires external API or may not be supported for this pair.");
         }
     }
 
