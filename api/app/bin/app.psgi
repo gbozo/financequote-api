@@ -227,53 +227,6 @@ use Finance::Quote;
             return error_response(400, "Cannot convert $from to $to", "Exchange rate not available. Try setting ALPHAVANTAGE_API_KEY.");
         }
     }
-            }
-            
-            if ($rate && $rate =~ /^-?[\d.]+$/) {
-                return json_response('success', {
-                    from => $from,
-                    to   => $to,
-                    rate => $rate + 0,
-                });
-            }
-        }
-        
-        # Fallback: Try general approach with FQ_CURRENCY setting
-        my @pairs = ("$from$to");
-        my %quotes;
-        
-        # Try YahooJSON first (free, some pairs work)
-        %quotes = $quoter->fetch('yahoojson', @pairs);
-        
-        my $rate;
-        foreach my $k (keys %quotes) {
-            if ($k =~ /^$from$/i && $quotes{$k}{success}) {
-                # Check the currency of the quote vs what we want
-                my $got_currency = $quotes{$k}{currency} // '';
-                if ($got_currency eq $to || $quotes{$k}{last}) {
-                    $rate = $quotes{$k}{close} || $quotes{$k}{last};
-                    last if $rate;
-                }
-            }
-        }
-        
-        # Try Currencies module as fallback
-        unless ($rate) {
-            %quotes = $quoter->fetch('Currencies', @pairs);
-            my $key = "${from}${to}";
-            $rate = $quotes{$key}{last} || $quotes{$key}{rate} if exists $quotes{$key};
-        }
-        
-        if ($rate && $rate =~ /^-?[\d.]+$/) {
-            return json_response('success', {
-                from => $from,
-                to   => $to,
-                rate => $rate + 0,
-            });
-        } else {
-            return error_response(400, "Cannot convert $from to $to", "Exchange rate not available. Try setting ALPHAVANTAGE_API_KEY environment variable.");
-        }
-    }
 
     # 5. Direct fetch with method
     sub handle_fetch {
