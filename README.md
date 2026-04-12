@@ -25,15 +25,25 @@ Made with love and patience, your friend George.
 
 ## 🎯 Quick Start
 
-### 1. Clone & Run
+### ⚡ One-Command Start (Recommended)
+
+```bash
+# Just run this - pulls image from GitHub Container Registry
+docker compose -f docker-compose.yaml up -d
+
+# Access the API
+curl http://localhost:3001/api/v1/health
+```
+
+### 🛠️ From Source (Development)
 
 ```bash
 # Clone the repo
 git clone https://github.com/gbozo/financequote-api.git
 cd financequote-api
 
-# Start the API
-docker compose -f docker/docker-compose.yaml up -d
+# Build and run
+docker compose -f docker/docker-compose.yaml up -d --build
 ```
 
 ### 2. Use the API
@@ -154,14 +164,17 @@ const quote = await client.getQuote('AAPL');
 
 ## 🐳 Docker Options
 
+### Production (uses released image)
 ```bash
-# Development
-docker compose -f docker/docker-compose.yaml up -d
+# Pull latest release and run
+docker compose -f docker-compose.yaml up -d
 
-# Custom port
-APP_PORT=7000 docker compose -f docker/docker-compose.yaml up -d
+# Or with custom port
+APP_PORT=7000 docker compose -f docker-compose.yaml up -d
+```
 
-# Rebuild with latest Finance::Quote
+### Development (builds from source)
+```bash
 docker compose -f docker/docker-compose.yaml up -d --build
 ```
 

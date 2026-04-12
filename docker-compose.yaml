@@ -1,0 +1,47 @@
+# Production-ready Docker Compose for FinanceQuote API
+# Usage: docker compose -f docker-compose.yaml up -d
+#
+# Default port: 3001 (mapped to container port 3000)
+# API URL: http://localhost:3001/api/v1
+# Docs: http://localhost:3001
+
+services:
+  financequote-api:
+    # Use latest release or pin a version:
+    # ghcr.io/gbozo/financequote-api:v1.0.0
+    image: ghcr.io/gbozo/financequote-api:latest
+    container_name: financequote-api
+    environment:
+      - APP_ENV=production
+      - APP_PORT=3001
+      - FQ_TIMEOUT=30
+      - FQ_FAILOVER=1
+      # API Authentication (optional - leave empty to disable)
+      # Set comma-separated keys: API_AUTH_KEYS=key1,key2
+      # - API_AUTH_KEYS=
+      
+      # Stock Quote API Keys (optional - only if using premium sources)
+      # - ALPHAVANTAGE_API_KEY=
+      # - TWELVEDATA_API_KEY=
+      # - FINANCEAPI_API_KEY=
+      # - STOCKDATA_API_KEY=
+      
+      # Currency API Keys (optional)
+      # - FIXER_API_KEY=
+      # - OPENEXCHANGE_API_KEY=
+      # - CURRENCYFREAKS_API_KEY=
+    ports:
+      - "3001:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - financequote-net
+
+networks:
+  financequote-net:
+    driver: bridge
