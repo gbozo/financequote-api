@@ -24,12 +24,40 @@ use Finance::Quote;
 
     # Read configuration from environment
     my $FQ_CURRENCY = $ENV{'FQ_CURRENCY'} // '';
+    
+    # All supported API keys from environment
     my $ALPHAVANTAGE_API_KEY = $ENV{'ALPHAVANTAGE_API_KEY'} // '';
+    my $TWELVEDATA_API_KEY = $ENV{'TWELVEDATA_API_KEY'} // '';
+    my $FINANCEAPI_API_KEY = $ENV{'FINANCEAPI_API_KEY'} // '';
+    my $STOCKDATA_API_KEY = $ENV{'STOCKDATA_API_KEY'} // '';
+    my $FIXER_API_KEY = $ENV{'FIXER_API_KEY'} // '';
+    my $OPENEXCHANGE_API_KEY = $ENV{'OPENEXCHANGE_API_KEY'} // '';
+    my $CURRENCYFREAKS_API_KEY = $ENV{'CURRENCYFREAKS_API_KEY'} // '';
     
     # Build Finance::Quote with configuration
     my @quoter_args = ();
+    
+    # Configure modules with their API keys
     if ($ALPHAVANTAGE_API_KEY) {
-        push @quoter_args, 'alphavantage', { API_KEY => $ALPHAVANTAGE_API_KEY };
+        push @quoter_args, 'AlphaVantage', { API_KEY => $ALPHAVANTAGE_API_KEY };
+    }
+    if ($TWELVEDATA_API_KEY) {
+        push @quoter_args, 'TwelveData', { API_KEY => $TWELVEDATA_API_KEY };
+    }
+    if ($FINANCEAPI_API_KEY) {
+        push @quoter_args, 'FinanceAPI', { API_KEY => $FINANCEAPI_API_KEY };
+    }
+    if ($STOCKDATA_API_KEY) {
+        push @quoter_args, 'StockData', { API_KEY => $STOCKDATA_API_KEY };
+    }
+    if ($FIXER_API_KEY) {
+        push @quoter_args, 'Fixer', { API_KEY => $FIXER_API_KEY };
+    }
+    if ($OPENEXCHANGE_API_KEY) {
+        push @quoter_args, 'OpenExchange', { API_KEY => $OPENEXCHANGE_API_KEY };
+    }
+    if ($CURRENCYFREAKS_API_KEY) {
+        push @quoter_args, 'CurrencyFreaks', { API_KEY => $CURRENCYFREAKS_API_KEY };
     }
     if ($FQ_CURRENCY) {
         $ENV{'FQ_CURRENCY'} = $FQ_CURRENCY;
