@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FinanceQuote API Documentation</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        h1 { color: #2c3e50; margin-bottom: 10px; }
+        h2 { color: #34495e; margin: 30px 0 15px; border-bottom: 2px solid #3498db; padding-bottom: 8px; }
+        h3 { color: #7f8c8d; margin: 20px 0 10px; }
+        code { background: #ecf0f1; padding: 2px 6px; border-radius: 3px; font-family: 'Monaco', 'Consolas', monospace; }
+        pre { background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        .endpoint { background: white; border-radius: 8px; padding: 20px; margin: 15px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .method { display: inline-block; padding: 4px 12px; border-radius: 4px; font-weight: bold; margin-right: 10px; }
+        .get { background: #3498db; color: white; }
+        .post { background: #27ae60; color: white; }
+        .path { font-family: monospace; font-size: 1.1em; color: #2c3e50; }
+        .params { margin-top: 15px; }
+        .param { display: flex; padding: 8px 0; border-bottom: 1px solid #eee; }
+        .param-name { font-weight: bold; min-width: 150px; color: #e74c3c; }
+        .param-desc { color: #7f8c8d; }
+        .test-section { background: white; border-radius: 8px; padding: 20px; margin: 20px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        input, select { padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin: 5px; }
+        button { background: #3498db; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; margin: 5px; }
+        button:hover { background: #2980b9; }
+        button.green { background: #27ae60; }
+        button.green:hover { background: #219a52; }
+        pre.curl { background: #27ae60; margin-top: 10px; }
+        pre.response { max-height: 300px; overflow: auto; }
+        .nav { background: white; padding: 15px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav a { margin-right: 20px; color: #3498db; text-decoration: none; }
+        .nav a:hover { text-decoration: underline; }
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #34495e; color: white; }
+        .success { color: #27ae60; }
+        .error { color: #e74c3c; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="#introduction">Introduction</a>
+            <a href="#endpoints">Endpoints</a>
+            <a href="#tester">Tester</a>
+            <a href="#sources">Data Sources</a>
+        </div>
+
+        <h1>📈 FinanceQuote API</h1>
+        <p>A REST API wrapper for the Perl Finance::Quote library (v1.68). Get real-time stock quotes, currency rates, and financial data from 46+ sources.</p>
+
+        <h2 id="introduction">Introduction</h2>
+        <p>Base URL: <code id="baseUrl">http://localhost:3001/api/v1</code></p>
+        
+        <h3>Authentication</h3>
+        <p>No authentication required by default. To enable, set <code>API_AUTH_KEYS</code> environment variable with comma-separated keys.</p>
+        <pre># Enable authentication
+API_AUTH_KEYS=key1,key2,key3
+
+# Usage with Bearer token
+curl -H "Authorization: Bearer key1" "http://localhost:3001/api/v1/quote/AAPL"</pre>
+
+        <h2 id="endpoints">API Endpoints</h2>
+
+        <div class="endpoint">
+            <span class="method get">GET</span>
+            <span class="path">/api/v1/health</span>
+            <p>Check API health status</p>
+            <div class="params">
+                <div class="param"><span class="param-name">None</span><span class="param-desc">No parameters required</span></div>
+            </div>
+            <pre>curl http://localhost:3001/api/v1/health</pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method get">GET</span>
+            <span class="path">/api/v1/methods</span>
+            <p>List all available quote methods</p>
+            <div class="params">
+                <div class="param"><span class="param-name">None</span><span class="param-desc">No parameters required</span></div>
+            </div>
+            <pre>curl http://localhost:3001/api/v1/methods</pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method get">GET</span>
+            <span class="path">/api/v1/quote/:symbols</span>
+            <p>Fetch stock quotes for one or more symbols</p>
+            <div class="params">
+                <div class="param"><span class="param-name">symbols</span><span class="param-desc">Stock ticker symbol(s), comma-separated</span></div>
+                <div class="param"><span class="param-name">method</span><span class="param-desc">Quote source (yahoojson, alphavantage, etc.). Default: yahoojson</span></div>
+                <div class="param"><span class="param-name">currency</span><span class="param-desc">Convert to this currency (USD, EUR, etc.)</span></div>
+            </div>
+            <pre>curl "http://localhost:3001/api/v1/quote/AAPL"
+curl "http://localhost:3001/api/v1/quote/AAPL,GOOGL?method=yahoojson"
+curl "http://localhost:3001/api/v1/quote/AAPL?currency=EUR"</pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method get">GET</span>
+            <span class="path">/api/v1/currency/:from/:to</span>
+            <p>Convert between currencies</p>
+            <div class="params">
+                <div class="param"><span class="param-name">from</span><span class="param-desc">Source currency code (e.g., USD)</span></div>
+                <div class="param"><span class="param-name">to</span><span class="param-desc">Target currency code (e.g., EUR)</span></div>
+            </div>
+            <pre>curl http://localhost:3001/api/v1/currency/USD/EUR</pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method get">GET</span>
+            <span class="path">/api/v1/fetch/:method/:symbols</span>
+            <p>Fetch quotes using a specific method</p>
+            <div class="params">
+                <div class="param"><span class="param-name">method</span><span class="param-desc">Quote source method (see /api/v1/methods)</span></div>
+                <div class="param"><span class="param-name">symbols</span><span class="param-desc">Stock ticker symbol(s), comma-separated</span></div>
+            </div>
+            <pre>curl "http://localhost:3001/api/v1/fetch/yahoojson/AAPL,MSFT"</pre>
+        </div>
+
+        <h2 id="tester">API Tester</h2>
+        <div class="test-section">
+            <h3>Test Quote Endpoint</h3>
+            <input type="text" id="testSymbol" placeholder="Symbol (e.g., AAPL)" value="AAPL">
+            <input type="text" id="testMethod" placeholder="Method (default: yahoojson)" value="yahoojson">
+            <button onclick="testQuote()">Test Quote</button>
+            <pre id="quoteCurl" class="curl">curl will appear here...</pre>
+            <pre id="quoteResult" class="response">Results will appear here...</pre>
+        </div>
+
+        <div class="test-section">
+            <h3>Test Currency Endpoint</h3>
+            <input type="text" id="testFrom" placeholder="From (e.g., USD)" value="USD">
+            <input type="text" id="testTo" placeholder="To (e.g., EUR)" value="EUR">
+            <button onclick="testCurrency()">Test Currency</button>
+            <pre id="currencyCurl" class="curl">curl will appear here...</pre>
+            <pre id="currencyResult" class="response">Results will appear here...</pre>
+        </div>
+
+        <div class="test-section">
+            <h3>Test Methods Endpoint</h3>
+            <button class="green" onclick="testMethods()">Get All Methods</button>
+            <pre id="methodsCurl" class="curl">curl will appear here...</pre>
+            <pre id="methodsResult" class="response">Results will appear here...</pre>
+        </div>
+
+        <h2 id="sources">Available Data Sources</h2>
+        <div class="test-section">
+            <button class="green" onclick="loadSources()">Load Sources from API</button>
+            <p style="margin-top:10px;color:#7f8c8d;">Click to load all available methods from the API. Note: Some methods may require API keys or have specific requirements.</p>
+            <table id="sourcesTable" style="display:none;">
+                <thead>
+                    <tr>
+                        <th>Method</th>
+                        <th>Description</th>
+                        <th>API Key Required</th>
+                    </tr>
+                </thead>
+                <tbody id="sourcesBody">
+                </tbody>
+            </table>
+        </div>
+
+        <h2>Response Format</h2>
+        <pre>{
+  "status": "success",
+  "data": { ... },
+  "timestamp": "2026-04-12T12:00:00Z"
+}</pre>
+
+        <h2>Error Response</h2>
+        <pre>{
+  "status": "error",
+  "error": {
+    "code": 400,
+    "message": "Error description",
+    "details": "Additional details"
+  },
+  "timestamp": "2026-04-12T12:00:00Z"
+}</pre>
+
+        <h2>Environment Variables for API Keys</h2>
+        <pre># Stock Quote APIs
+ALPHAVANTAGE_API_KEY=your_key
+TWELVEDATA_API_KEY=your_key
+FINANCEAPI_API_KEY=your_key
+STOCKDATA_API_KEY=your_key
+
+# Currency APIs
+FIXER_API_KEY=your_key
+OPENEXCHANGE_API_KEY=your_key
+CURRENCYFREAKS_API_KEY=your_key</pre>
+
+        <p style="margin-top: 30px; color: #7f8c8d; text-align: center;">
+            FinanceQuote API v1.68 | Powered by Perl Finance::Quote
+        </p>
+    </div>
+
+    <script>
+        // Dynamic base URL detection
+        const BASE_URL = window.location.origin + '/api/v1';
+        const BASE_HOST = window.location.host;
+
+        // Update examples in documentation with dynamic URL
+        document.addEventListener('DOMContentLoaded', function() {
+            // Update base URL display
+            const baseUrlEl = document.getElementById('baseUrl');
+            if (baseUrlEl) {
+                baseUrlEl.textContent = BASE_URL;
+            }
+            // Update code examples with actual host
+            document.querySelectorAll('pre').forEach(pre => {
+                if (pre.textContent.includes('localhost:3001')) {
+                    pre.textContent = pre.textContent.replace(/http:\/\/localhost:3001/g, 'http://' + BASE_HOST);
+                }
+            });
+        });
+
+        async function testQuote() {
+            const symbol = document.getElementById('testSymbol').value;
+            const method = document.getElementById('testMethod').value;
+            const resultEl = document.getElementById('quoteResult');
+            const curlEl = document.getElementById('quoteCurl');
+            
+            resultEl.textContent = 'Loading...';
+            const url = `${BASE_URL}/quote/${symbol}?method=${method}`;
+            curlEl.textContent = `curl "${url}"`;
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                resultEl.textContent = JSON.stringify(data, null, 2);
+            } catch (e) {
+                resultEl.textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function testCurrency() {
+            const from = document.getElementById('testFrom').value;
+            const to = document.getElementById('testTo').value;
+            const resultEl = document.getElementById('currencyResult');
+            const curlEl = document.getElementById('currencyCurl');
+            
+            resultEl.textContent = 'Loading...';
+            const url = `${BASE_URL}/currency/${from}/${to}`;
+            curlEl.textContent = `curl "${url}"`;
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                resultEl.textContent = JSON.stringify(data, null, 2);
+            } catch (e) {
+                resultEl.textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function testMethods() {
+            const resultEl = document.getElementById('methodsResult');
+            const curlEl = document.getElementById('methodsCurl');
+            
+            resultEl.textContent = 'Loading...';
+            const url = `${BASE_URL}/methods`;
+            curlEl.textContent = `curl "${url}"`;
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                resultEl.textContent = JSON.stringify(data, null, 2);
+            } catch (e) {
+                resultEl.textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function loadSources() {
+            const tbody = document.getElementById('sourcesBody');
+            const table = document.getElementById('sourcesTable');
+            tbody.innerHTML = '<tr><td colspan="3">Loading...</td></tr>';
+            table.style.display = 'table';
+            
+            try {
+                const response = await fetch(`${BASE_URL}/methods`);
+                const data = await response.json();
+                const methods = data.data.methods;
+                
+                // Known API key requirements
+                const requireKey = {
+                    'AlphaVantage': 'Yes',
+                    'TwelveData': 'Yes',
+                    'FinanceAPI': 'Yes',
+                    'StockData': 'Yes'
+                };
+                
+                let html = '';
+                methods.forEach(m => {
+                    const needsKey = requireKey[m] || 'No';
+                    const cls = needsKey === 'Yes' ? 'error' : 'success';
+                    html += `<tr><td>${m.toLowerCase()}</td><td>${m}</td><td class="${cls}">${needsKey}</td></tr>`;
+                });
+                tbody.innerHTML = html;
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="3" class="error">Error: ${e.message}</td></tr>`;
+            }
+        }
+    </script>
+</body>
+</html>

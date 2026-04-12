@@ -1,0 +1,59 @@
+# Docker Ignore Rules
+# Files and directories to exclude from Docker build context
+
+# Version control
+.git
+.gitignore
+.gitattributes
+.svn
+.hg
+
+# Finance::Quote local source (now installed via CPAN)
+Finance-Quote-1.68/
+
+# IDE and editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Perlbuild/test
+Makefile.old
+pm_to_blib
+MYMETA.*
+*.o
+*.so
+*.xs
+Build
+Build.bat
+
+# Test results
+t/
+xt/
+prove_cache
+coverage
+cover_db/
+
+# Documentation
+README.md
+CHANGES
+TODO
+*.txt
+*.md
+docs/
+
+# Logs
+*.log
+logs/
+
+# Temp files
+*.tmp
+*.temp
+tmp/
+cache/
+
+# Local config (not to be in container)
+local/
+config.yml

@@ -1,0 +1,43 @@
+# FinanceQuote API - Docker Compose
+# Use: docker-compose -f docker/docker-compose.yaml up --build
+
+services:
+  financequote-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: financequote-api
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - APP_PORT=${APP_PORT:-3001}
+      - APP_HOST=${APP_HOST:-0.0.0.0}
+      - FQ_TIMEOUT=${FQ_TIMEOUT:-30}
+      - FQ_FAILOVER=${FQ_FAILOVER:-1}
+      # API Authentication (comma-separated keys, e.g., key1,key2,key3)
+      # Leave empty to disable authentication
+      - API_AUTH_KEYS=${API_AUTH_KEYS:-}
+      # Stock quote sources:
+      - ALPHAVANTAGE_API_KEY=${ALPHAVANTAGE_API_KEY:-}
+      - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY:-}
+      - FINANCEAPI_API_KEY=${FINANCEAPI_API_KEY:-}
+      - STOCKDATA_API_KEY=${STOCKDATA_API_KEY:-}
+      # Currency rate sources:
+      - FIXER_API_KEY=${FIXER_API_KEY:-}
+      - OPENEXCHANGE_API_KEY=${OPENEXCHANGE_API_KEY:-}
+      - CURRENCYFREAKS_API_KEY=${CURRENCYFREAKS_API_KEY:-}
+    ports:
+      - "${APP_PORT:-3001}:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - financequote-net
+
+networks:
+  financequote-net:
+    driver: bridge
+    name: financequote-net
