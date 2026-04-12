@@ -32,6 +32,42 @@ The API runs on **http://localhost:3001** — test it immediately:
 curl http://localhost:3001/api/v1/health
 ```
 
+### Full docker-compose.yaml
+
+<details>
+<summary><strong>Click to expand - copy and customize</strong></summary>
+
+```yaml
+# Production-ready Docker Compose for FinanceQuote API
+services:
+  financequote-api:
+    image: ghcr.io/gbozo/financequote-api:latest
+    container_name: financequote-api
+    environment:
+      - APP_ENV=production
+      - APP_PORT=3001
+      - FQ_TIMEOUT=30
+      # - FQ_CURRENCY=EUR        # Optional: set default currency
+      # - API_AUTH_KEYS=key1     # Optional: enable auth
+      # - ALPHAVANTAGE_API_KEY=   # Optional: premium quotes
+    ports:
+      - "3001:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - financequote-net
+
+networks:
+  financequote-net:
+    driver: bridge
+```
+
+</details>
+
 ## ✨ Features
 
 - 🚀 **45+ Data Sources** — Yahoo Finance, AlphaVantage, Twelve Data, European exchanges, and more
@@ -219,52 +255,6 @@ docker compose -f docker-compose.yaml up -d
 # Or with custom port
 APP_PORT=7000 docker compose -f docker-compose.yaml up -d
 ```
-
-### Development (builds from source)
-```bash
-docker compose -f docker/docker-compose.yaml up -d --build
-```
-
-### Full docker-compose.yaml
-
-<details>
-<summary><strong>Click to expand</strong></summary>
-
-Copy the following into a file named `docker-compose.yaml`:
-
-```yaml
-# Production-ready Docker Compose for FinanceQuote API
-# Usage: docker compose -f docker-compose.yaml up -d
-services:
-  financequote-api:
-    image: ghcr.io/gbozo/financequote-api:latest
-    container_name: financequote-api
-    environment:
-      - APP_ENV=production
-      - APP_PORT=3001
-      - FQ_TIMEOUT=30
-      # - FQ_CURRENCY=EUR        # Optional: set default currency
-      # - API_AUTH_KEYS=key1     # Optional: enable auth
-      # - ALPHAVANTAGE_API_KEY=   # Optional: premium quotes
-    ports:
-      - "3001:3000"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/v1/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - financequote-net
-
-networks:
-  financequote-net:
-    driver: bridge
-```
-
-<p><em>Paste the code above into <code>docker-compose.yaml</code> and run <code>docker compose up -d</code></em></p>
-
-</details>
 
 ## 🤝 Contributing
 
