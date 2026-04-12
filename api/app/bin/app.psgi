@@ -81,7 +81,7 @@ use Finance::Quote;
 
     use strict;
     use warnings;
-    use JSON::XS qw(encode_json);
+    use JSON::XS qw(encode_json decode_json);
 
     # Read cache configuration from environment
     my $FQ_CACHE_TTL = $ENV{'FQ_CACHE_TTL'} // 900;  # Default 15 minutes
