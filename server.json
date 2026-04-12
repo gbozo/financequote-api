@@ -1,0 +1,84 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.financequote.api",
+  "title": "FinanceQuote API",
+  "description": "Fetch stock quotes, currency rates, and financial data from 45+ global sources",
+  "provider": {
+    "name": "FinanceQuote"
+  },
+  "author": {
+    "name": "George B.",
+    "email": "financequote@example.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gbozo/financequote-api"
+  },
+  "homepage": "https://github.com/gbozo/financequote-api",
+  "license": "MIT",
+  "keywords": ["finance", "stock", "quotes", "currency", "forex", "trading"],
+  "platforms": ["darwin", "win32", "linux"],
+  "runtimes": ["node", "python", "docker"],
+  "tools": [
+    {
+      "name": "get_quote",
+      "description": "Fetch stock, ETF, or other financial quotes from various sources like Yahoo Finance, AlphaVantage, etc.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbols": {
+            "type": "string",
+            "description": "Comma-separated list of symbols (e.g., AAPL,MSFT,GOOGL)"
+          },
+          "method": {
+            "type": "string",
+            "description": "Quote method to use (default: yahoojson)",
+            "default": "yahoojson"
+          },
+          "currency": {
+            "type": "string",
+            "description": "Desired currency code (e.g., USD, EUR)"
+          }
+        },
+        "required": ["symbols"]
+      }
+    },
+    {
+      "name": "get_currency",
+      "description": "Get currency exchange rate between two currencies",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "Source currency code (e.g., USD)"
+          },
+          "to": {
+            "type": "string",
+            "description": "Target currency code (e.g., EUR)"
+          }
+        },
+        "required": ["from", "to"]
+      }
+    },
+    {
+      "name": "list_methods",
+      "description": "List all available quote fetch methods (data sources)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_methods",
+      "description": "Get detailed information about available quote sources and their status",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "capabilities": {
+    "tools": {}
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "financequote": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "ghcr.io/gbozo/financequote-api:latest"],
+      "env": {},
+      "type": "stdio"
+    }
+  }
+}
