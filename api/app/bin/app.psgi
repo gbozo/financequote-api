@@ -22,7 +22,20 @@ use Finance::Quote;
     use warnings;
     use JSON::XS qw(encode_json);
 
-    my $quoter = Finance::Quote->new();
+    # Read configuration from environment
+    my $FQ_CURRENCY = $ENV{'FQ_CURRENCY'} // '';
+    my $ALPHAVANTAGE_API_KEY = $ENV{'ALPHAVANTAGE_API_KEY'} // '';
+    
+    # Build Finance::Quote with configuration
+    my @quoter_args = ();
+    if ($ALPHAVANTAGE_API_KEY) {
+        push @quoter_args, 'alphavantage', { API_KEY => $ALPHAVANTAGE_API_KEY };
+    }
+    if ($FQ_CURRENCY) {
+        $ENV{'FQ_CURRENCY'} = $FQ_CURRENCY;
+    }
+    
+    my $quoter = Finance::Quote->new(@quoter_args);
 
     # Get current timestamp in ISO format
     sub get_timestamp {
@@ -119,30 +132,55 @@ use Finance::Quote;
     sub handle_currency {
         my ($from, $to, $params) = @_;
         
-        # Try to get currency rate using YahooJSON (supports some pairs)
-        # Finance::Quote can fetch currencies via various methods
-        my @pairs = ("$from$to");
-        
-        # Try fetching currency via a stock quote approach (some sources support it)
-        my %quotes = $quoter->fetch('yahoojson', @pairs);
-        
-        my $rate;
-        # Check various key formats returned by different modules
-        my $key = "${from}${to}";
-        
-        # Try different key formats
-        foreach my $k (keys %quotes) {
-            if ($k =~ /^${from}$to$/i || $k =~ /^${from}.*$to$/i) {
-                $rate = $quotes{$k}{last} || $quotes{$k}{rate} || $quotes{$k};
-                last if $rate;
+        # For currency, we can try alphavantage (needs API key) or other methods
+        # First, let's check if we have AlphaVantage configured for currencies
+        if ($ALPHAVANTAGE_API_KEY) {
+            # Use alphavantage with currency endpoint
+            my @pairs = ("$from$to");
+            my %quotes = $quoter->fetch('alphavantage', @pairs);
+            
+            my $rate;
+            foreach my $k (keys %quotes) {
+                if ($k =~ /^${from}/i) {
+                    # Check if conversion happened (from -> to)
+                    $rate = $quotes{$k}{close} || $quotes{$k}{last} || $quotes{$k}{rate};
+                    last if $rate;
+                }
+            }
+            
+            if ($rate && $rate =~ /^-?[\d.]+$/) {
+                return json_response('success', {
+                    from => $from,
+                    to   => $to,
+                    rate => $rate + 0,
+                });
             }
         }
         
-        # If not found, try currency specific modules
+        # Fallback: Try general approach with FQ_CURRENCY setting
+        my @pairs = ("$from$to");
+        my %quotes;
+        
+        # Try YahooJSON first (free, some pairs work)
+        %quotes = $quoter->fetch('yahoojson', @pairs);
+        
+        my $rate;
+        foreach my $k (keys %quotes) {
+            if ($k =~ /^$from$/i && $quotes{$k}{success}) {
+                # Check the currency of the quote vs what we want
+                my $got_currency = $quotes{$k}{currency} // '';
+                if ($got_currency eq $to || $quotes{$k}{last}) {
+                    $rate = $quotes{$k}{close} || $quotes{$k}{last};
+                    last if $rate;
+                }
+            }
+        }
+        
+        # Try Currencies module as fallback
         unless ($rate) {
-            # Try fetching from Currencies module
             %quotes = $quoter->fetch('Currencies', @pairs);
-            $rate = $quotes{$key}{last} || $quotes{$key}{rate};
+            my $key = "${from}${to}";
+            $rate = $quotes{$key}{last} || $quotes{$key}{rate} if exists $quotes{$key};
         }
         
         if ($rate && $rate =~ /^-?[\d.]+$/) {
@@ -152,7 +190,7 @@ use Finance::Quote;
                 rate => $rate + 0,
             });
         } else {
-            return error_response(400, "Cannot convert $from to $to", "Exchange rate not available. Currency conversion requires external API or may not be supported for this pair.");
+            return error_response(400, "Cannot convert $from to $to", "Exchange rate not available. Try setting ALPHAVANTAGE_API_KEY environment variable.");
         }
     }
 

@@ -13,6 +13,8 @@ services:
       - APP_HOST=${APP_HOST:-0.0.0.0}
       - FQ_TIMEOUT=${FQ_TIMEOUT:-30}
       - FQ_FAILOVER=${FQ_FAILOVER:-1}
+      # Target currency for returned quotes (optional: EUR, GBP, etc.)
+      - FQ_CURRENCY=${FQ_CURRENCY:-}
       # API Authentication (comma-separated keys, e.g., key1,key2,key3)
       # Leave empty to disable authentication
       - API_AUTH_KEYS=${API_AUTH_KEYS:-}

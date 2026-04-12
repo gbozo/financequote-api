@@ -16,11 +16,14 @@ services:
       - APP_PORT=3001
       - FQ_TIMEOUT=30
       - FQ_FAILOVER=1
+      # Target currency for quotes (optional)
+      # - FQ_CURRENCY=EUR
       # API Authentication (optional - leave empty to disable)
       # Set comma-separated keys: API_AUTH_KEYS=key1,key2
       # - API_AUTH_KEYS=
       
       # Stock Quote API Keys (optional - only if using premium sources)
+      # Alphavantage supports both quotes AND currency conversion
       # - ALPHAVANTAGE_API_KEY=
       # - TWELVEDATA_API_KEY=
       # - FINANCEAPI_API_KEY=
