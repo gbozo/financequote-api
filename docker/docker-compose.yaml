@@ -27,6 +27,11 @@ services:
       - FIXER_API_KEY=${FIXER_API_KEY:-}
       - OPENEXCHANGE_API_KEY=${OPENEXCHANGE_API_KEY:-}
       - CURRENCYFREAKS_API_KEY=${CURRENCYFREAKS_API_KEY:-}
+      # Cache settings (optional):
+      #   FQ_CACHE_TTL: Cache duration in seconds (default: 900 = 15 minutes)
+      #   FQ_CACHE_ENABLED: 1 to enable, 0 to disable (default: 1)
+      - FQ_CACHE_TTL=${FQ_CACHE_TTL:-900}
+      - FQ_CACHE_ENABLED=${FQ_CACHE_ENABLED:-1}
     ports:
       - "${APP_PORT:-3001}:3000"
     restart: unless-stopped

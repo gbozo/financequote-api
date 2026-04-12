@@ -12,6 +12,67 @@ use Plack::Builder;
 use Finance::Quote;
 
 # ============================================
+# In-Memory Cache Module
+# ============================================
+
+{
+    package FQCache;
+
+    use strict;
+    use warnings;
+
+    # Cache storage: key => [expires_at, data]
+    my %cache;
+    my $ttl = 900;  # Default 15 minutes
+    my $enabled = 1;
+
+    sub configure {
+        my ($env_ttl, $env_enabled) = @_;
+        $ttl = $env_ttl // 900 if $env_ttl && $env_ttl =~ /^\d+$/;
+        $enabled = $env_enabled // 1;
+    }
+
+    sub get {
+        my ($key) = @_;
+        return undef unless $enabled;
+        my $entry = $cache{$key};
+        return undef unless $entry;
+        my ($expires, $data) = @$entry;
+        if (time > $expires) {
+            delete $cache{$key};
+            return undef;
+        }
+        return $data;
+    }
+
+    sub set {
+        my ($key, $data, $custom_ttl) = @_;
+        return unless $enabled;
+        my $expire_ttl = $custom_ttl || $ttl;
+        $cache{$key} = [ time + $expire_ttl, $data ];
+    }
+
+    sub clear {
+        %cache = ();
+    }
+
+    sub stats {
+        my $now = time;
+        my $count = 0;
+        my $expired = 0;
+        foreach my $key (keys %cache) {
+            my $entry = $cache{$key};
+            if ($entry->[0] > $now) {
+                $count++;
+            } else {
+                $expired++;
+            }
+        }
+        return { enabled => $enabled, ttl => $ttl, entries => $count, expired => $expired };
+    }
+}
+
+# ============================================
 # API Application
 # ============================================
 
@@ -21,6 +82,11 @@ use Finance::Quote;
     use strict;
     use warnings;
     use JSON::XS qw(encode_json);
+
+    # Read cache configuration from environment
+    my $FQ_CACHE_TTL = $ENV{'FQ_CACHE_TTL'} // 900;  # Default 15 minutes
+    my $FQ_CACHE_ENABLED = $ENV{'FQ_CACHE_ENABLED'} // 1;
+    FQCache::configure($FQ_CACHE_TTL, $FQ_CACHE_ENABLED);
 
     # Read configuration from environment
     my $FQ_CURRENCY = $ENV{'FQ_CURRENCY'} // '';
@@ -110,7 +176,12 @@ use Finance::Quote;
 
     # 1. Health Check
     sub handle_health {
-        return json_response('success', { service => 'FinanceQuote API', version => '1.68' });
+        my $cache_stats = FQCache::stats();
+        return json_response('success', { 
+            service => 'FinanceQuote API', 
+            version => '1.69',
+            cache => $cache_stats,
+        });
     }
 
     # 2. List Available Methods
@@ -123,9 +194,16 @@ use Finance::Quote;
     sub handle_quote {
         my ($symbols, $params) = @_;
         
-        my @syms = split(/,/, $symbols);
+        # Build cache key
         my $method = $params->{method} || 'yahoojson';
         my $currency = $params->{currency} || '';
+        my $cache_key = "quote:${symbols}:${method}:${currency}";
+        
+        # Check cache
+        my $cached = FQCache::get($cache_key);
+        return $cached if $cached;
+        
+        my @syms = split(/,/, $symbols);
         
         # Set currency if specified
         $quoter->{currency} = $currency if $currency;
@@ -153,12 +231,21 @@ use Finance::Quote;
             }
         }
         
-        return json_response('success', \%result);
+        my $response = json_response('success', \%result);
+        FQCache::set($cache_key, $response);
+        return $response;
     }
 
 # 4. Currency Conversion
     sub handle_currency {
         my ($from, $to, $params) = @_;
+        
+        # Build cache key
+        my $cache_key = "currency:${from}:${to}";
+        
+        # Check cache
+        my $cached = FQCache::get($cache_key);
+        return $cached if $cached;
         
         # For currency, we can try alphavantage (needs API key) or other methods
         if ($ALPHAVANTAGE_API_KEY) {
@@ -178,11 +265,13 @@ use Finance::Quote;
             }
             
             if ($rate && $rate =~ /^-?[\d.]+$/) {
-                return json_response('success', {
+                my $response = json_response('success', {
                     from => $from,
                     to   => $to,
                     rate => $rate + 0,
                 });
+                FQCache::set($cache_key, $response);
+                return $response;
             }
         }
         
@@ -218,11 +307,13 @@ use Finance::Quote;
         }
         
         if ($rate && $rate =~ /^-?[\d.]+$/) {
-            return json_response('success', {
+            my $response = json_response('success', {
                 from => $from,
                 to   => $to,
                 rate => $rate + 0,
             });
+            FQCache::set($cache_key, $response);
+            return $response;
         } else {
             return error_response(400, "Cannot convert $from to $to", "Exchange rate not available. Try setting ALPHAVANTAGE_API_KEY.");
         }
@@ -241,6 +332,13 @@ use Finance::Quote;
             return error_response(400, "Unknown method: $method", "Use /api/v1/methods to see available methods");
         }
         
+        # Build cache key
+        my $cache_key = "fetch:${method}:${symbols}";
+        
+        # Check cache
+        my $cached = FQCache::get($cache_key);
+        return $cached if $cached;
+        
         my @syms = split(/,/, $symbols);
         my %quotes = $quoter->fetch($method, @syms);
         
@@ -254,7 +352,9 @@ use Finance::Quote;
             }
         }
         
-        return json_response('success', \%result);
+        my $response = json_response('success', \%result);
+        FQCache::set($cache_key, $response);
+        return $response;
     }
 }
 
