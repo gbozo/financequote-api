@@ -7,9 +7,11 @@
 
 services:
   financequote-api:
-    # Use latest release or pin a version:
-    # ghcr.io/gbozo/financequote-api:v1.0.0
-    image: ghcr.io/gbozo/financequote-api:latest
+    # Build from local Dockerfile
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: financequote-api:local
     container_name: financequote-api
     environment:
       - APP_ENV=production

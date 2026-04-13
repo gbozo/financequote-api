@@ -151,6 +151,9 @@ if ($tool_name eq 'my_tool') {
 ## Testing Locally
 
 ```bash
+# Use docker-compose.local.yaml for local development (builds from local Dockerfile)
+docker compose -f docker-compose.local.yaml up -d
+
 # Health check
 curl http://localhost:3001/api/v1/health
 
@@ -167,6 +170,19 @@ curl http://localhost:3001/api/v1/currency/USD/EUR
 curl -X POST http://localhost:3001/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+```
+
+## Docker Workflow
+
+| File | Use | Command |
+|------|-----|---------|
+| `docker-compose.yaml` | Production (uses official image) | `docker compose -f docker-compose.yaml up -d` |
+| `docker-compose.local.yaml` | Local development (builds from local Dockerfile) | `docker compose -f docker-compose.local.yaml up -d` |
+
+To build and push official image:
+```bash
+docker compose -f docker-compose.local.yaml build
+docker push ghcr.io/gbozo/financequote-api:latest
 ```
 
 ## Common Pitfalls
