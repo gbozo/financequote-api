@@ -7,9 +7,11 @@
 
 services:
   financequote-api:
-    # Use latest release or pin a version:
-    # ghcr.io/gbozo/financequote-api:v1.0.0
-    image: ghcr.io/gbozo/financequote-api:latest
+    # Build from local Dockerfile
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: financequote-api:local
     container_name: financequote-api
     environment:
       - APP_ENV=production
@@ -39,6 +41,9 @@ services:
       # - FQ_CACHE_ENABLED=1    # Enable/disable cache (default: 1 = enabled)
     ports:
       - "3001:3000"
+    # tmpfs for SQLite database (recommended for performance with large datasets)
+    tmpfs:
+      - /tmp:size=512m,mode=1777
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/v1/health"]

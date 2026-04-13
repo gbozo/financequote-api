@@ -1,0 +1,12 @@
+#!/bin/bash
+# Daily update script for financedatabase
+# This updates the Python financedatabase package to the latest version
+
+set -e
+
+echo "Starting financedatabase update at $(date)"
+
+# Upgrade financedatabase to latest version
+python3 -m pip install --no-cache-dir --break-system-packages -U financedatabase
+
+echo "financedatabase update completed at $(date)"

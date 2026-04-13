@@ -73,6 +73,248 @@ use Finance::Quote;
 }
 
 # ============================================
+# SQLite Database Lookup Module
+# ============================================
+
+{
+    package FQDB;
+
+    use strict;
+    use warnings;
+    use DBI;
+    use Fcntl qw(:flock);
+    
+    my $db_path = '/tmp/finance_database.db';
+    my $lock_path = '/tmp/finance_database.db.lock';
+    my $dbh;
+    my $lock_fh;
+    
+    sub connect {
+        return $dbh if $dbh;
+        $dbh = DBI->connect("dbi:SQLite:dbname=$db_path", "", "", {
+            PrintError => 0,
+            RaiseError => 0,
+        });
+        if ($dbh) {
+            # Enable WAL mode and busy timeout
+            $dbh->do("PRAGMA journal_mode=WAL");
+            $dbh->do("PRAGMA busy_timeout=30000");
+            $dbh->do("PRAGMA synchronous=NORMAL");
+        }
+        return $dbh;
+    }
+    
+    sub disconnect {
+        $dbh->disconnect if $dbh;
+        $dbh = undef;
+    }
+    
+    # Search by name, symbol, or ISIN (LIKE query)
+    sub search {
+        my ($query, $type, $limit, $opts) = @_;
+        $limit //= 20;
+        $query =~ s/['"]//g;  # Sanitize
+        
+        my $db = FQDB::connect();
+        return [] unless $db;
+        
+        my $primary_only = $opts->{primary_only} // 0;
+        
+        # Primary exchanges for major markets (include these, exclude others as secondary)
+        my @primary_exchanges = ('NMS', 'NAS', 'NYS', 'NYQ', 'NCM', 'LSE', 'HKG', 'JPX', 'ASX', 'NSE', 'TWO', 'KOE', 'KSC', 'SES', 'SET', 'STO', 'CPH', 'HEL', 'OSL', 'VIE', 'AMS', 'PAR', 'MIL', 'FRA', 'MUN', 'DUS', 'BER', 'BRU', 'LIS', 'MAD');
+        
+        my @tables = $type ? ($type) : ('equities', 'etfs', 'funds', 'indices', 'currencies', 'cryptos', 'moneymarkets');
+        my @results;
+        
+        foreach my $table (@tables) {
+            my $where_clause = "WHERE (symbol LIKE ? OR name LIKE ? OR isin LIKE ?)";
+            if ($primary_only) {
+                my $in_list = join(",", map { "'$_'" } @primary_exchanges);
+                $where_clause .= " AND exchange IN ($in_list)";
+            }
+            
+            my $stmt = "SELECT symbol, name, exchange, country, sector, market_cap, isin FROM $table $where_clause LIMIT ?";
+            my $sth = eval { $db->prepare($stmt) };
+            next unless $sth;
+            $sth->execute("%$query%", "%$query%", "%$query%", $limit);
+            
+            while (my $row = $sth->fetchrow_hashref) {
+                $row->{type} = $table;
+                push @results, $row;
+            }
+            $sth->finish;
+            
+            last if scalar(@results) >= $limit;
+        }
+        
+        return \@results;
+    }
+    
+    # Lookup by exact symbol
+    sub lookup_symbol {
+        my ($symbol, $types) = @_;
+        $symbol =~ s/['"]//g;
+        $symbol = uc($symbol);
+        
+        my $db = FQDB::connect();
+        return {} unless $db;
+        
+        my @tables = $types ? @$types : ('equities', 'etfs', 'funds', 'indices', 'currencies', 'cryptos', 'moneymarkets');
+        
+        foreach my $table (@tables) {
+            my $stmt = "SELECT * FROM $table WHERE symbol = ?";
+            my $sth = eval { $db->prepare($stmt) };
+            next unless $sth;
+            $sth->execute($symbol);
+            
+            if (my $row = $sth->fetchrow_hashref) {
+                $sth->finish;
+                $row->{type} = $table;
+                return $row;
+            }
+            $sth->finish;
+        }
+        
+        return undef;
+    }
+    
+    # Filter by multiple criteria
+    sub filter {
+        my (%opts) = @_;
+        
+        my $db = FQDB::connect();
+        return [] unless $db;
+        
+        my $type = $opts{type} // 'equities';
+        my $sector = $opts{sector};
+        my $country = $opts{country};
+        my $exchange = $opts{exchange};
+        my $market_cap = $opts{market_cap};
+        my $industry = $opts{industry};
+        my $limit = $opts{limit} // 100;
+        
+        my @conditions;
+        my @params;
+        
+        push @conditions, "sector = ?" and push @params, $sector if $sector;
+        push @conditions, "country = ?" and push @params, $country if $country;
+        push @conditions, "exchange = ?" and push @params, $exchange if $exchange;
+        push @conditions, "market_cap = ?" and push @params, $market_cap if $market_cap;
+        push @conditions, "industry LIKE ?" and push @params, "%$industry%" if $industry;
+        
+        my $where = @conditions ? "WHERE " . join(" AND ", @conditions) : "";
+        
+        my $stmt = "SELECT symbol, name, exchange, country, sector, industry, market_cap FROM $type $where LIMIT ?";
+        push @params, $limit;
+        
+        my $sth = eval { $db->prepare($stmt) };
+        return [] unless $sth;
+        $sth->execute(@params);
+        
+        my @results;
+        while (my $row = $sth->fetchrow_hashref) {
+            push @results, $row;
+        }
+        $sth->finish;
+        
+        return \@results;
+    }
+    
+    # Get available filter options
+    sub get_filter_options {
+        my ($type) = @_;
+        $type //= 'equities';
+        
+        my $db = FQDB::connect();
+        return {} unless $db;
+        
+        my %options;
+        
+        # Sectors
+        my $sth = eval { $db->prepare("SELECT DISTINCT sector FROM $type WHERE sector IS NOT NULL ORDER BY sector") };
+        return {} unless $sth;
+        $sth->execute();
+        $options{sectors} = [];
+        while (my $row = $sth->fetch()) {
+            push @{$options{sectors}}, $row->[0] if $row->[0];
+        }
+        $sth->finish;
+        
+        # Countries
+        $sth = eval { $db->prepare("SELECT DISTINCT country FROM $type WHERE country IS NOT NULL ORDER BY country") };
+        if ($sth) {
+            $sth->execute();
+            $options{countries} = [];
+            while (my $row = $sth->fetch()) {
+                push @{$options{countries}}, $row->[0] if $row->[0];
+            }
+            $sth->finish;
+        }
+        
+        # Exchanges
+        $sth = eval { $db->prepare("SELECT DISTINCT exchange FROM $type WHERE exchange IS NOT NULL ORDER BY exchange") };
+        if ($sth) {
+            $sth->execute();
+            $options{exchanges} = [];
+            while (my $row = $sth->fetch()) {
+                push @{$options{exchanges}}, $row->[0] if $row->[0];
+            }
+            $sth->finish;
+        }
+        
+        # Market caps
+        $sth = eval { $db->prepare("SELECT DISTINCT market_cap FROM $type WHERE market_cap IS NOT NULL ORDER BY market_cap") };
+        if ($sth) {
+            $sth->execute();
+            $options{market_caps} = [];
+            while (my $row = $sth->fetch()) {
+                push @{$options{market_caps}}, $row->[0] if $row->[0];
+            }
+            $sth->finish;
+        }
+        
+        return \%options;
+    }
+    
+    # Get database statistics
+    sub stats {
+        my $db = FQDB::connect();
+        return { error => "Database not available", status => "offline" } unless $db;
+        
+        my %stats;
+        
+        my @tables = ('equities', 'etfs', 'funds', 'indices', 'currencies', 'cryptos', 'moneymarkets');
+        
+        foreach my $table (@tables) {
+            my $sth = eval { $db->prepare("SELECT COUNT(*) FROM $table") };
+            next unless $sth;
+            $sth->execute();
+            my $row = $sth->fetch();
+            $stats{$table} = $row ? $row->[0] : 0;
+            $sth->finish;
+        }
+        
+        $stats{total} = 0;
+        $stats{total} += $_ for values %stats;
+        
+        return \%stats;
+    }
+    
+    # Get all asset types
+    sub asset_types {
+        return [
+            { name => 'equities', description => 'Stock equities from global markets' },
+            { name => 'etfs', description => 'Exchange-traded funds' },
+            { name => 'funds', description => 'Mutual funds and investment funds' },
+            { name => 'indices', description => 'Market indices' },
+            { name => 'currencies', description => 'Currency pairs' },
+            { name => 'cryptos', description => 'Cryptocurrencies' },
+            { name => 'moneymarkets', description => 'Money market instruments' },
+        ];
+    }
+}
+
+# ============================================
 # API Application
 # ============================================
 
@@ -509,6 +751,88 @@ use Finance::Quote;
                             required => ['symbol'],
                         },
                     },
+                    {
+                        name => 'search_assets',
+                        description => 'Search for financial assets by name, symbol, or ISIN. Use primary=true to filter primary listings only.',
+                        inputSchema => {
+                            type => 'object',
+                            properties => {
+                                query => {
+                                    type => 'string',
+                                    description => 'Search query (name, symbol, or ISIN)',
+                                },
+                                type => {
+                                    type => 'string',
+                                    description => 'Asset type (equities, etfs, funds, indices, currencies, cryptos, moneymarkets)',
+                                },
+                                limit => {
+                                    type => 'integer',
+                                    description => 'Max results (default 20)',
+                                },
+                                primary => {
+                                    type => 'boolean',
+                                    description => 'Filter to primary exchanges only (default false)',
+                                },
+                            },
+                            required => ['query'],
+                        },
+                    },
+                    {
+                        name => 'lookup_symbol',
+                        description => 'Lookup exact symbol details from the database (name, exchange, country, sector, ISIN, etc.)',
+                        inputSchema => {
+                            type => 'object',
+                            properties => {
+                                symbol => {
+                                    type => 'string',
+                                    description => 'Stock symbol (e.g., AAPL, MSFT)',
+                                },
+                            },
+                            required => ['symbol'],
+                        },
+                    },
+                    {
+                        name => 'filter_assets',
+                        description => 'Filter assets by criteria like sector, country, exchange, market cap',
+                        inputSchema => {
+                            type => 'object',
+                            properties => {
+                                type => {
+                                    type => 'string',
+                                    description => 'Asset type (equities, etfs, funds, indices, currencies, cryptos, moneymarkets)',
+                                },
+                                sector => {
+                                    type => 'string',
+                                    description => 'Filter by sector (e.g., Technology, Healthcare)',
+                                },
+                                country => {
+                                    type => 'string',
+                                    description => 'Filter by country (e.g., United States, China)',
+                                },
+                                exchange => {
+                                    type => 'string',
+                                    description => 'Filter by exchange (e.g., NMS, LSE, HKG)',
+                                },
+                                market_cap => {
+                                    type => 'string',
+                                    description => 'Filter by market cap (Large Cap, Mid Cap, Small Cap, etc.)',
+                                },
+                                limit => {
+                                    type => 'integer',
+                                    description => 'Max results (default 100)',
+                                },
+                            },
+                            required => ['type'],
+                        },
+                    },
+                    {
+                        name => 'get_db_stats',
+                        description => 'Get database statistics (row counts per asset type)',
+                        inputSchema => {
+                            type => 'object',
+                            properties => {},
+                        },
+                    },
                 ],
             });
         }
@@ -614,6 +938,51 @@ use Finance::Quote;
                 }
                 
                 return jsonrpc_error($id, -3201, "Symbol info failed", "Cannot get info for $symbol");
+            }
+            
+            # Database tools
+            if ($tool_name eq 'search_assets') {
+                my $query = $tool_args->{query} // '';
+                my $type = $tool_args->{type} // '';
+                my $limit = $tool_args->{limit} // 20;
+                my $primary = $tool_args->{primary} // 0;
+                
+                my $results = FQDB::search($query, $type, $limit, { primary_only => $primary });
+                return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json({ results => $results, count => scalar(@$results) }) }] });
+            }
+            
+            if ($tool_name eq 'lookup_symbol') {
+                my $symbol = $tool_args->{symbol} // '';
+                my $result = FQDB::lookup_symbol($symbol);
+                
+                if ($result) {
+                    return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($result) }] });
+                }
+                return jsonrpc_error($id, -3202, "Symbol not found", "No data found for $symbol");
+            }
+            
+            if ($tool_name eq 'filter_assets') {
+                my $type = $tool_args->{type} // 'equities';
+                my $sector = $tool_args->{sector};
+                my $country = $tool_args->{country};
+                my $exchange = $tool_args->{exchange};
+                my $market_cap = $tool_args->{market_cap};
+                my $limit = $tool_args->{limit} // 100;
+                
+                my $results = FQDB::filter(
+                    type => $type,
+                    sector => $sector,
+                    country => $country,
+                    exchange => $exchange,
+                    market_cap => $market_cap,
+                    limit => $limit,
+                );
+                return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json({ results => $results, count => scalar(@$results) }) }] });
+            }
+            
+            if ($tool_name eq 'get_db_stats') {
+                my $stats = FQDB::stats();
+                return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($stats) }] });
             }
             
             return jsonrpc_error($id, -32601, "Method not found", "Unknown tool: $tool_name");
@@ -776,6 +1145,84 @@ sub {
     # Route: /api/v1/fetch/:method/:symbols
     if ($path eq '/api/v1/fetch/([^/]+)/([^/]+)$') {
         return FQAPI::handle_fetch($1, $2, \%params);
+    }
+    
+    # ===== SQLite Database Routes =====
+    
+    # Route: /api/v1/db/stats - Database statistics
+    if ($path eq '/api/v1/db/stats') {
+        my $stats = FQDB::stats();
+        return FQAPI::json_response('success', $stats);
+    }
+    
+    # Route: /api/v1/db/assets - List available asset types
+    if ($path eq '/api/v1/db/assets') {
+        my $types = FQDB::asset_types();
+        return FQAPI::json_response('success', { types => $types });
+    }
+    
+    # Route: /api/v1/db/options/:type - Get filter options for a type
+    if ($path =~ m{^/api/v1/db/options/([^/]+)$}) {
+        my $type = $1;
+        my $options = FQDB::get_filter_options($type);
+        return FQAPI::json_response('success', $options);
+    }
+    
+    # Route: /api/v1/search?q=...&type=...&limit=... - Search by name or symbol
+    if ($path eq '/api/v1/search') {
+        my $query = $params{q} // '';
+        my $type = $params{type} // '';
+        my $limit = $params{limit} // 20;
+        my $primary_only = $params{primary} // 0;
+        
+        unless ($query) {
+            return FQAPI::error_response(400, "Missing query", "Provide a search query with ?q=...");
+        }
+        
+        my $results = FQDB::search($query, $type, $limit, { primary_only => $primary_only });
+        return FQAPI::json_response('success', { results => $results, count => scalar(@$results) });
+    }
+    
+    # Route: /api/v1/lookup/:symbol - Lookup exact symbol in database
+    if ($path =~ m{^/api/v1/lookup/([^/]+)$}) {
+        my $symbol = $1;
+        my $result = FQDB::lookup_symbol($symbol);
+        
+        if ($result) {
+            return FQAPI::json_response('success', $result);
+        } else {
+            return FQAPI::error_response(404, "Symbol not found", "No data found for symbol $symbol");
+        }
+    }
+    
+    # Route: /api/v1/filter - Filter assets by criteria
+    if ($path eq '/api/v1/filter') {
+        my $type = $params{type} // 'equities';
+        my $sector = $params{sector};
+        my $country = $params{country};
+        my $exchange = $params{exchange};
+        my $market_cap = $params{market_cap};
+        my $industry = $params{industry};
+        my $limit = $params{limit} // 100;
+        
+        my @valid_types = qw(equities etfs funds indices currencies cryptos moneymarkets);
+        my %valid;
+        @valid{@valid_types} = ();
+        unless ($valid{$type}) {
+            return FQAPI::error_response(400, "Invalid type", "Valid types: " . join(", ", @valid_types));
+        }
+        
+        my $results = FQDB::filter(
+            type => $type,
+            sector => $sector,
+            country => $country,
+            exchange => $exchange,
+            market_cap => $market_cap,
+            industry => $industry,
+            limit => $limit,
+        );
+        
+        return FQAPI::json_response('success', { results => $results, count => scalar(@$results) });
     }
     
     # MCP Protocol endpoint (JSON-RPC 2.0)

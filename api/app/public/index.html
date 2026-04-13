@@ -38,19 +38,36 @@
         th { background: #34495e; color: white; }
         .success { color: #27ae60; }
         .error { color: #e74c3c; }
+        .copy-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: #34495e;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .copy-btn:hover { background: #2c3e50; }
+        .copy-btn.copied { background: #27ae60; }
+        .code-block { position: relative; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="nav">
-            <a href="#introduction">Introduction</a>
-            <a href="#endpoints">Endpoints</a>
-            <a href="#tester">Tester</a>
-            <a href="#sources">Data Sources</a>
+            <a href="#introduction">Intro</a>
+            <a href="#mcp">MCP</a>
+            <a href="#database">Database</a>
+            <a href="#endpoints">API</a>
+            <a href="#sources">Sources</a>
         </div>
 
         <h1>📈 FinanceQuote API</h1>
-        <p>A REST API wrapper for the Perl Finance::Quote library (v1.68). Get real-time stock quotes, currency rates, and financial data from 46+ sources.</p>
+        <p>A REST API wrapper for the Perl Finance::Quote library. Get real-time stock quotes, currency rates, and financial data from 46+ sources.</p>
+        <p id="versionInfo"><strong>Version:</strong> <span id="fqVersion">Loading...</span></p>
 
         <h2 id="introduction">Introduction</h2>
         <p>Base URL: <code id="baseUrl">http://localhost:3001/api/v1</code></p>
@@ -63,26 +80,139 @@ API_AUTH_KEYS=key1,key2,key3
 # Usage with Bearer token
 curl -H "Authorization: Bearer key1" "http://localhost:3001/api/v1/quote/AAPL"</pre>
 
+        <h2 id="mcp">MCP Configuration</h2>
+        <p>FinanceQuote provides an MCP (Model Context Protocol) server for AI agents and LLM frontends. Below are configuration guides for popular MCP clients.</p>
+
+        <h3>OpenWebUI</h3>
+        <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre>Server Name: FinanceQuote
+URL: http://localhost:3001/mcp
+Auth: None</pre>
+        </div>
+
+        <h3>LMStudio (SSE Transport - Recommended)</h3>
+        <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre>{
+  "mcpServers": {
+    "financequote": {
+      "url": "http://localhost:3001/mcp/sse"
+    }
+  }
+}</pre>
+        </div>
+        <p>Or in LMStudio Settings → MCP Servers → Add Server:</p>
+        <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre>Server Name: FinanceQuote
+URL: http://localhost:3001/mcp/sse</pre>
+        </div>
+
+        <h3>Other MCP Clients</h3>
+        <p>SSE Transport (Recommended):</p>
+        <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre>http://localhost:3001/mcp/sse</pre>
+        </div>
+        <p>HTTP Transport (Fallback):</p>
+        <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre>http://localhost:3001/mcp</pre>
+        </div>
+
+        <h3>MCP Tools Available</h3>
+        <ul>
+            <li><strong>get_quote</strong> - Fetch stock quotes</li>
+            <li><strong>get_currency</strong> - Currency exchange rates</li>
+            <li><strong>search_assets</strong> - Search by name/symbol/ISIN</li>
+            <li><strong>lookup_symbol</strong> - Get symbol details</li>
+            <li><strong>filter_assets</strong> - Filter by sector/country/exchange</li>
+            <li><strong>get_db_stats</strong> - Database statistics</li>
+        </ul>
+
+        <h2 id="database">SQLite Database Endpoints</h2>
+        <p>Access 350K+ global securities from FinanceDatabase.</p>
+
+        <div class="endpoint">
+            <span class="method get">GET</span>
+            <span class="path">/api/v1/db/stats</span>
+            <p>Database statistics (row counts per asset type)</p>
+            <pre>curl http://localhost:3001/api/v1/db/stats</pre>
+            <button onclick="testEndpoint('stats','/db/stats','dbstatsResult')">Test</button>
+            <pre id="dbstatsResult" class="response">Result will appear here...</pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method get">GET</span>
+            <span class="path">/api/v1/db/options/:type</span>
+            <p>Get filter options (sectors, countries, exchanges)</p>
+            <pre>curl http://localhost:3001/api/v1/db/options/equities</pre>
+            <button onclick="testEndpoint('options','/db/options/equities','optionsResult')">Test</button>
+            <pre id="optionsResult" class="response">Result will appear here...</pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method get">GET</span>
+            <span class="path">/api/v1/search?q=&type=&primary=&limit=</span>
+            <p>Search by name, symbol, or ISIN. Use primary=1 for primary exchanges only.</p>
+            <pre>curl "http://localhost:3001/api/v1/search?q=apple&limit=5"</pre>
+            <button onclick="testEndpoint('search','/search?q=apple&limit=3','searchResult')">Test</button>
+            <pre id="searchResult" class="response">Result will appear here...</pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method get">GET</span>
+            <span class="path">/api/v1/quote/:symbols</span>
+            <p>Fetch stock quotes. Use method=yahoojson (default).</p>
+            <pre>curl "http://localhost:3001/api/v1/quote/AAPL,MSFT"</pre>
+            <button onclick="testEndpoint('quote','/quote/AAPL','quoteResult')">Test</button>
+            <pre id="quoteResult" class="response">Result will appear here...</pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method get">GET</span>
+            <span class="path">/api/v1/currency/:from/:to</span>
+            <p>Get currency exchange rate</p>
+            <pre>curl http://localhost:3001/api/v1/currency/USD/EUR</pre>
+            <button onclick="testEndpoint('currency','/currency/USD/EUR','currencyResult')">Test</button>
+            <pre id="currencyResult" class="response">Result will appear here...</pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method get">GET</span>
+            <span class="path">/api/v1/lookup/:symbol</span>
+            <p>Lookup exact symbol details</p>
+            <pre>curl http://localhost:3001/api/v1/lookup/AAPL</pre>
+            <button onclick="testEndpoint('lookup','/lookup/AAPL','lookupResult')">Test</button>
+            <pre id="lookupResult" class="response">Result will appear here...</pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method get">GET</span>
+            <span class="path">/api/v1/filter?type=&sector=&country=&exchange=&limit=</span>
+            <p>Filter assets by criteria</p>
+            <pre>curl "http://localhost:3001/api/v1/filter?type=equities&sector=Technology&country=United+States&limit=10"</pre>
+            <button onclick="testEndpoint('filter','/filter?type=equities&sector=Technology&limit=3','filterResult')">Test</button>
+            <pre id="filterResult" class="response">Result will appear here...</pre>
+        </div>
+
         <h2 id="endpoints">API Endpoints</h2>
 
         <div class="endpoint">
             <span class="method get">GET</span>
             <span class="path">/api/v1/health</span>
             <p>Check API health status</p>
-            <div class="params">
-                <div class="param"><span class="param-name">None</span><span class="param-desc">No parameters required</span></div>
-            </div>
-            <pre>curl http://localhost:3001/api/v1/health</pre>
+            <button onclick="testEndpoint('health','/health','healthResult')">Test</button>
+            <pre id="healthResult" class="response">Result will appear here...</pre>
         </div>
 
         <div class="endpoint">
             <span class="method get">GET</span>
             <span class="path">/api/v1/methods</span>
             <p>List all available quote methods</p>
-            <div class="params">
-                <div class="param"><span class="param-name">None</span><span class="param-desc">No parameters required</span></div>
-            </div>
-            <pre>curl http://localhost:3001/api/v1/methods</pre>
+            <button onclick="testEndpoint('methods','/methods','methodsResult')">Test</button>
+            <pre id="methodsResult" class="response">Result will appear here...</pre>
         </div>
 
         <div class="endpoint">
@@ -119,32 +249,8 @@ curl "http://localhost:3001/api/v1/quote/AAPL?currency=EUR"</pre>
                 <div class="param"><span class="param-name">symbols</span><span class="param-desc">Stock ticker symbol(s), comma-separated</span></div>
             </div>
             <pre>curl "http://localhost:3001/api/v1/fetch/yahoojson/AAPL,MSFT"</pre>
-        </div>
-
-        <h2 id="tester">API Tester</h2>
-        <div class="test-section">
-            <h3>Test Quote Endpoint</h3>
-            <input type="text" id="testSymbol" placeholder="Symbol (e.g., AAPL)" value="AAPL">
-            <input type="text" id="testMethod" placeholder="Method (default: yahoojson)" value="yahoojson">
-            <button onclick="testQuote()">Test Quote</button>
-            <pre id="quoteCurl" class="curl">curl will appear here...</pre>
-            <pre id="quoteResult" class="response">Results will appear here...</pre>
-        </div>
-
-        <div class="test-section">
-            <h3>Test Currency Endpoint</h3>
-            <input type="text" id="testFrom" placeholder="From (e.g., USD)" value="USD">
-            <input type="text" id="testTo" placeholder="To (e.g., EUR)" value="EUR">
-            <button onclick="testCurrency()">Test Currency</button>
-            <pre id="currencyCurl" class="curl">curl will appear here...</pre>
-            <pre id="currencyResult" class="response">Results will appear here...</pre>
-        </div>
-
-        <div class="test-section">
-            <h3>Test Methods Endpoint</h3>
-            <button class="green" onclick="testMethods()">Get All Methods</button>
-            <pre id="methodsCurl" class="curl">curl will appear here...</pre>
-            <pre id="methodsResult" class="response">Results will appear here...</pre>
+            <button onclick="testEndpoint('fetch','/fetch/yahoojson/AAPL','fetchResult')">Test</button>
+            <pre id="fetchResult" class="response">Result will appear here...</pre>
         </div>
 
         <h2 id="sources">Available Data Sources</h2>
@@ -195,11 +301,25 @@ OPENEXCHANGE_API_KEY=your_key
 CURRENCYFREAKS_API_KEY=your_key</pre>
 
         <p style="margin-top: 30px; color: #7f8c8d; text-align: center;">
-            FinanceQuote API v1.68 | Powered by Perl Finance::Quote
+            FinanceQuote API | Powered by ❤️ and lots of patience - Your friend George 
         </p>
     </div>
 
     <script>
+        // Copy to clipboard function
+        function copyCode(btn) {
+            const pre = btn.parentElement.querySelector('pre');
+            const text = pre.textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                btn.textContent = 'Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = 'Copy';
+                    btn.classList.remove('copied');
+                }, 2000);
+            });
+        }
+
         // Dynamic base URL detection
         const BASE_URL = window.location.origin + '/api/v1';
         const BASE_HOST = window.location.host;
@@ -217,8 +337,40 @@ CURRENCYFREAKS_API_KEY=your_key</pre>
                     pre.textContent = pre.textContent.replace(/http:\/\/localhost:3001/g, 'http://' + BASE_HOST);
                 }
             });
+            // Fetch and display Finance::Quote version
+            fetchVersion();
         });
 
+        async function fetchVersion() {
+            try {
+                const response = await fetch(`${BASE_URL}/health`);
+                const data = await response.json();
+                const versionEl = document.getElementById('fqVersion');
+                if (versionEl && data.data && data.data.version) {
+                    versionEl.textContent = `v${data.data.version} (Finance::Quote)`;
+                }
+            } catch (e) {
+                const versionEl = document.getElementById('fqVersion');
+                if (versionEl) {
+                    versionEl.textContent = 'Unable to fetch version';
+                }
+            }
+        }
+
+        async function testEndpoint(type, path, resultId) {
+            const resultEl = document.getElementById(resultId);
+            resultEl.textContent = 'Loading...';
+            const url = `${BASE_URL}${path}`;
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                resultEl.textContent = JSON.stringify(data, null, 2);
+            } catch (e) {
+                resultEl.textContent = 'Error: ' + e.message;
+            }
+        }
+
+        // Keep legacy function for backward compatibility
         async function testQuote() {
             const symbol = document.getElementById('testSymbol').value;
             const method = document.getElementById('testMethod').value;

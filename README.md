@@ -17,9 +17,13 @@ Universal financial data API - stocks, forex, crypto via 45+ providers - Docker 
 
 Made with love and patience, your friend George.
 
-## 🖥️ OpenWebUI Integration
+## 🖥️ MCP Configuration
 
-Connect FinanceQuote to OpenWebUI (or any LLM frontend that supports MCP) for natural language queries:
+FinanceQuote provides a built-in MCP (Model Context Protocol) server that allows AI agents and LLM frontends to access financial data naturally. Below are configuration guides for popular MCP clients.
+
+### OpenWebUI Integration
+
+Connect FinanceQuote to OpenWebUI for natural language queries about stocks and currencies:
 
 <p align="center">
   <img src="openwebui-mcp.jpeg" alt="OpenWebUI MCP Configuration" width="600"/>
@@ -28,6 +32,105 @@ Connect FinanceQuote to OpenWebUI (or any LLM frontend that supports MCP) for na
 <p align="center">
   <img src="openwebui-chat.jpeg" alt="OpenWebUI Chat Example" width="600"/>
 </p>
+
+#### OpenWebUI MCP Configuration
+
+1. Go to **Settings** → **Connections** → **MCP Servers**
+2. Click **Add MCP Server**
+3. Fill in the following:
+
+| Setting | Value |
+|---------|-------|
+| **Name** | `FinanceQuote` |
+| **URL** | `http://localhost:3001/mcp` |
+| **Auth** | `None` (or Bearer token if `API_AUTH_KEYS` is set) |
+
+4. Click **Connect** — you should see "FinanceQuote" listed as connected
+5. Start chatting! Example prompts:
+   - "What's the current price of AAPL?"
+   - "Convert 100 USD to EUR"
+   - "Get quotes for MSFT, GOOGL, and AMZN"
+
+---
+
+### LMStudio MCP Configuration
+
+LMStudio supports MCP servers for local LLM inference with tool-calling capabilities.
+
+#### Option 1: Using LMStudio's Built-in MCP UI
+
+1. Open LMStudio and go to **Settings** → **MCP Servers**
+2. Click **Add Server**
+3. Configure as follows:
+
+```
+Server Name: FinanceQuote
+Command: npx
+Arguments: -y @modelcontextprotocol/server-http
+Server URL: http://localhost:3001/mcp
+```
+
+4. Click **Connect** — the server should appear in your list of connected MCP servers
+
+#### Option 2: Using SSE Transport (Recommended)
+
+For more reliable connections, use the SSE (Server-Sent Events) transport:
+
+1. In LMStudio's MCP settings, add a new server with:
+
+```
+Server Name: FinanceQuote
+Command: node
+Arguments: (leave empty - use URL below)
+URL: http://localhost:3001/mcp/sse
+```
+
+2. Or configure via LMStudio's JSON config:
+
+```json
+{
+  "mcpServers": {
+    "financequote": {
+      "url": "http://localhost:3001/mcp/sse"
+    }
+  }
+}
+```
+
+#### Testing Your LMStudio Connection
+
+1. Load a model with tool-calling enabled (e.g., Llama 3.1 with function calling)
+2. Start a conversation and try:
+   - "What's the stock price for Tesla?"
+   - "Show me the EUR to GBP exchange rate"
+   - "Get quotes for AAPL, MSFT, and NVDA"
+
+---
+
+### Other MCP Clients
+
+For any other MCP-compatible client (Claude Desktop, Cursor, etc.):
+
+#### SSE Transport (Recommended)
+
+```
+URL: http://localhost:3001/mcp/sse
+```
+
+#### HTTP Transport (Fallback)
+
+```
+URL: http://localhost:3001/mcp
+```
+
+#### Environment Variables for MCP
+
+If using authentication, set the appropriate headers:
+
+| Variable | Description |
+|----------|-------------|
+| `API_AUTH_KEYS` | Enable Bearer token auth |
+| `MCP_AUTH_TOKEN` | Token to pass via Authorization header |
 
 ## ⚡ Quick Install (Copy & Deploy)
 

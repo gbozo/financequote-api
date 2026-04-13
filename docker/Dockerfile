@@ -22,12 +22,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libhtml-tagset-perl \
     libtry-tiny-perl \
     libjson-perl \
+    python3 \
+    python3-pip \
+    python3-venv \
+    cron \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages
+RUN python3 -m pip install --no-cache-dir --break-system-packages financedatabase
 
 # Install cpanm and all Perl dependencies including Finance::Quote
 RUN curl -sL https://cpanmin.us | perl - App::cpanminus && \
     cpanm --notest Plack Starman JSON::XS String::Util HTML::TableExtract Web::Scraper Text::Template Date::Manip Time::Piece Date::Parse && \
-    cpanm --notest Finance::Quote
+    cpanm --notest Finance::Quote DBD::SQLite
 
 # Create app user
 RUN groupadd -g 1000 appgroup && useradd -m -u 1000 -g appgroup appuser
@@ -44,21 +51,21 @@ COPY ../api/app/bin/app.psgi /app/app.psgi
 # Copy public documentation
 COPY ../api/app/public /app/public
 
+# Copy cron scripts
+COPY ../cron-scripts /usr/local/bin/
+
+# Copy cron file (before switching to non-root)
+COPY ../cron-scripts/financequote.cron /etc/cron.d/financequote
+RUN chmod 0644 /etc/cron.d/financequote && \
+    mkdir -p /var/run && chmod 1777 /var/run && \
+    touch /var/log/cron.log && \
+    chown appuser:appgroup /var/log/cron.log
+
 # Fix permissions - make sure lib directory is readable
-RUN chown -R appuser:appgroup /app && chmod -R a+rX /app
+RUN chown -R appuser:appgroup /app /var/log/cron.log && chmod -R a+rX /app
 
 # Switch to non-root user
 USER appuser
 
-# Expose port
-EXPOSE 3000
-
-# Set PERL5LIB to find CPAN modules
-ENV PERL5LIB=/opt/perl/lib/perl5
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
-    CMD curl -f http://localhost:3000/api/v1/health || exit 1
-
-# Run using plackup
-CMD ["plackup", "-s", "Starman", "-l", "0.0.0.0:3000", "/app/app.psgi"]
+# Run database import on startup, then cron and plackup
+CMD ["sh", "-c", "python3 /usr/local/bin/import_financedatabase.py && (crontab /etc/cron.d/financequote && exec cron -f) & exec plackup -s Starman -l 0.0.0.0:3000 /app/app.psgi"]
