@@ -590,22 +590,19 @@ use Finance::Quote;
     
     sub jsonrpc_response {
         my ($id, $result) = @_;
-        my $ts = get_timestamp();
-        my $json_text = '{"jsonrpc":"2.0","id":' . (defined $id ? $id : 'null') . ',"result":' . encode_json($result) . ',"timestamp":"' . $ts . '"}';
+        my $json_text = '{"jsonrpc":"2.0","id":' . (defined $id ? $id : 'null') . ',"result":' . encode_json($result) . '}';
         return [ 200, [ 'Content-Type' => 'application/json', 'Access-Control-Allow-Origin' => '*' ], [ $json_text ] ];
     }
     
     sub jsonrpc_error {
         my ($id, $code, $message, $data) = @_;
-        my $ts = get_timestamp();
-        my $json_text = '{"jsonrpc":"2.0","id":' . (defined $id ? $id : 'null') . ',"error":{"code":' . $code . ',"message":"' . $message . '","data":"' . ($data // '') . '"},"timestamp":"' . $ts . '"}';
+        my $json_text = '{"jsonrpc":"2.0","id":' . (defined $id ? $id : 'null') . ',"error":{"code":' . $code . ',"message":"' . $message . '","data":"' . ($data // '') . '"}}';
         return [ 200, [ 'Content-Type' => 'application/json', 'Access-Control-Allow-Origin' => '*' ], [ $json_text ] ];
     }
     
     sub json_error_response {
         my ($code, $message, $data) = @_;
-        my $ts = get_timestamp();
-        my $json_text = '{"jsonrpc":"2.0","id":null,"error":{"code":' . $code . ',"message":"' . $message . '","data":"' . ($data // '') . '"},"timestamp":"' . $ts . '"}';
+        my $json_text = '{"jsonrpc":"2.0","id":null,"error":{"code":' . $code . ',"message":"' . $message . '","data":"' . ($data // '') . '"}}';
         return [ 200, [ 'Content-Type' => 'application/json', 'Access-Control-Allow-Origin' => '*' ], [ $json_text ] ];
     }
 }
@@ -686,13 +683,33 @@ sub {
     }
     
     # MCP Protocol endpoint (JSON-RPC 2.0)
-    if ($path eq '/mcp' && $method eq 'POST') {
-        my $content_length = $env->{CONTENT_LENGTH} // 0;
-        my $body = '';
-        if ($content_length > 0) {
-            $env->{'psgi.input'}->read($body, $content_length);
+    if ($path eq '/mcp') {
+        # Handle POST (Streamable HTTP)
+        if ($method eq 'POST') {
+            my $content_length = $env->{CONTENT_LENGTH} // 0;
+            my $body = '';
+            if ($content_length > 0) {
+                $env->{'psgi.input'}->read($body, $content_length);
+            }
+            return FQAPI::handle_mcp($body);
         }
-        return FQAPI::handle_mcp($body);
+        
+        # Handle GET for SSE fallback (backwards compatibility with older clients)
+        if ($method eq 'GET') {
+            # Send SSE priming event per MCP spec
+            my $event_id = time();
+            my $sse_data = "event: endpoint\nid: $event_id\ndata:\n\n";
+            return [ 200, [ 
+                'Content-Type' => 'text/event-stream',
+                'Cache-Control' => 'no-cache',
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Methods' => 'GET, POST, OPTIONS',
+                'Access-Control-Allow-Headers' => 'Content-Type, MCP-Protocol-Version, MCP-Session-Id',
+            ], [ $sse_data ] ];
+        }
+        
+        # Return 405 for other methods
+        return [ 405, [ 'Content-Type' => 'application/json', 'Access-Control-Allow-Origin' => '*' ], [ '{"jsonrpc":"2.0","error":{"code":-32600,"message":"Method not allowed"}}' ] ];
     }
     
     # Serve static files (documentation)
