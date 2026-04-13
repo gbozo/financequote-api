@@ -17,7 +17,7 @@ services:
       - FQ_TIMEOUT=30
       - FQ_FAILOVER=1
       # Target currency for quotes (optional)
-      # - FQ_CURRENCY=EUR
+      - FQ_CURRENCY=EUR
       # API Authentication (optional - leave empty to disable)
       # Set comma-separated keys: API_AUTH_KEYS=key1,key2
       # - API_AUTH_KEYS=

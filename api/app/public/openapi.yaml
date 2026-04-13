@@ -1,0 +1,562 @@
+openapi: 3.0.3
+info:
+  title: FinanceQuote API
+  description: |
+    REST API wrapper for Perl's Finance::Quote library ({FQ_VERSION}) and FinanceDatabase python library with MCP support.
+    Provides real-time stock quotes, currency rates, and financial data from 46+ sources.
+    
+    ### Environment Variables:
+      - `FQ_CURRENCY` - Default currency for quotes (e.g., EUR)
+      - `FQ_CACHE_TTL` - Cache duration in seconds (default: 900)
+      - `FQ_CACHE_ENABLED` - Enable/disable cache (default: 1)
+      - `FQ_TIMEOUT` - Request timeout in seconds
+      - `FQ_FAILOVER` - Enable failover to next source on failure
+      - `API_AUTH_KEYS` - Comma-separated API keys for authentication
+      - `ALPHAVANTAGE_API_KEY` - AlphaVantage API key for premium data
+    
+    ### Authentication:
+    Set `API_AUTH_KEYS` env var with comma-separated keys to enable auth.
+    
+    ### Stock Quote API Keys
+      - ALPHAVANTAGE_API_KEY - AlphaVantage API key for premium data
+      - TWELVEDATA_API_KEY
+      - FINANCEAPI_API_KEY
+      - STOCKDATA_API_KEY
+
+    ### Currency API Keys
+      - FIXER_API_KEY
+      - OPENEXCHANGE_API_KEY
+      - CURRENCYFREAKS_API_KEY
+
+    ### App Settings
+      - APP_PORT - 3001 default
+
+    ## MCP
+    FinanceQuote provides a built-in MCP (Model Context Protocol) server that allows AI agents and LLM frontends to access financial data naturally. Below are configuration guides for popular MCP clients.
+
+    ### OpenWebUI Integration
+
+    Connect FinanceQuote to OpenWebUI for natural language queries about stocks and currencies:
+
+    <p align="center">
+      <img src="openwebui-mcp.jpeg" alt="OpenWebUI MCP Configuration" width="600"/>
+    </p>
+
+    <p align="center">
+      <img src="openwebui-chat.jpeg" alt="OpenWebUI Chat Example" width="600"/>
+    </p>
+
+    #### OpenWebUI MCP Configuration
+
+    1. Go to **Settings** → **Connections** → **MCP Servers**
+    2. Click **Add MCP Server**
+    3. Fill in the following:
+
+    | Setting | Value |
+    |---------|-------|
+    | **Name** | `FinanceQuote` |
+    | **URL** | `http://localhost:3001/mcp` |
+    | **Auth** | `None` (or Bearer token if `API_AUTH_KEYS` is set) |
+
+    4. Click **Connect** — you should see "FinanceQuote" listed as connected
+    5. Start chatting! Example prompts:
+      - "What's the current price of AAPL?"
+      - "Convert 100 USD to EUR"
+      - "Get quotes for MSFT, GOOGL, and AMZN"
+
+    ---
+
+    ### LMStudio MCP Configuration
+
+    LMStudio supports MCP servers for local LLM inference with tool-calling capabilities.
+
+    #### Option 1: Using LMStudio's Built-in MCP UI
+
+    1. Open LMStudio and go to **Settings** → **MCP Servers**
+    2. Click **Add Server**
+    3. Configure as follows:
+
+    ```
+    Server Name: FinanceQuote
+    Command: npx
+    Arguments: -y @modelcontextprotocol/server-http
+    Server URL: http://localhost:3001/mcp
+    ```
+
+    4. Click **Connect** — the server should appear in your list of connected MCP servers
+
+    #### Option 2: Using SSE Transport (Recommended)
+
+    For more reliable connections, use the SSE (Server-Sent Events) transport:
+
+    1. In LMStudio's MCP settings, add a new server with:
+
+    ```
+    Server Name: FinanceQuote
+    Command: node
+    Arguments: (leave empty - use URL below)
+    URL: http://localhost:3001/mcp/sse
+    ```
+
+    2. Or configure via LMStudio's JSON config:
+
+    ```json
+    {
+      "mcpServers": {
+        "financequote": {
+          "url": "http://localhost:3001/mcp/sse"
+        }
+      }
+    }
+    ```
+
+    #### Testing Your LMStudio Connection
+
+    1. Load a model with tool-calling enabled (e.g., Llama 3.1 with function calling)
+    2. Start a conversation and try:
+      - "What's the stock price for Tesla?"
+      - "Show me the EUR to GBP exchange rate"
+      - "Get quotes for AAPL, MSFT, and NVDA"
+
+    ---
+
+    ### Other MCP Clients
+
+    For any other MCP-compatible client (Claude Desktop, Cursor, etc.):
+
+    #### SSE Transport (Recommended)
+
+    ```
+    URL: http://localhost:3001/mcp/sse
+    ```
+
+    #### HTTP Transport (Fallback)
+
+    ```
+    URL: http://localhost:3001/mcp
+    ```
+
+    #### Environment Variables for MCP
+
+    If using authentication, set the appropriate headers:
+
+    | Variable | Description |
+    |----------|-------------|
+    | `API_AUTH_KEYS` | Enable Bearer token auth |
+    | `MCP_AUTH_TOKEN` | Token to pass via Authorization header |
+    
+    Made with ❤️ and patience!
+    Your friend,
+    George
+    
+    
+  version: "{FQ_VERSION}"
+  contact:
+    name: FinanceQuote
+    url: https://github.com/gbozo/financequote-api
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: "{SERVER_URL}"
+    description: Current server
+
+tags:
+  - name: Quote
+    description: Stock and security quote endpoints
+  - name: Currency
+    description: Currency conversion endpoints
+  - name: Database
+    description: FinanceDatabase lookup endpoints
+  - name: MCP
+    description: Model Context Protocol endpoints
+  - name: System
+    description: System and info endpoints
+
+paths:
+  /api/v1/health:
+    get:
+      tags:
+        - System
+      summary: Health check
+      description: Check API health status and version
+      operationId: getHealth
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/v1/methods:
+    get:
+      tags:
+        - System
+      summary: List quote methods
+      description: List all available quote fetch methods from Finance::Quote
+      operationId: listMethods
+      responses:
+        '200':
+          description: List of available methods
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MethodsResponse'
+
+  /api/v1/quote/{symbols}:
+    get:
+      tags:
+        - Quote
+      summary: Fetch stock quotes
+      description: Fetch quotes for one or more stock symbols
+      operationId: getQuote
+      parameters:
+        - name: symbols
+          in: path
+          required: true
+          description: Stock ticker symbols (comma-separated)
+          schema:
+            type: string
+            example: AAPL,MSFT
+        - name: method
+          in: query
+          description: "Quote source method (default: YahooJSON)"
+          schema:
+            type: string
+            default: YahooJSON
+        - name: currency
+          in: query
+          description: Convert to this currency
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Quote data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuoteResponse'
+
+  /api/v1/info/{symbol}:
+    get:
+      tags:
+        - Quote
+      summary: Get symbol info
+      description: Get detailed metadata about a stock symbol
+      operationId: getSymbolInfo
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+            example: AAPL
+        - name: method
+          in: query
+          schema:
+            type: string
+            default: YahooJSON
+      responses:
+        '200':
+          description: Symbol metadata
+
+  /api/v1/currency/{from}/{to}:
+    get:
+      tags:
+        - Currency
+      summary: Currency conversion
+      description: Get exchange rate between two currencies
+      operationId: getCurrency
+      parameters:
+        - name: from
+          in: path
+          required: true
+          schema:
+            type: string
+            example: USD
+        - name: to
+          in: path
+          required: true
+          schema:
+            type: string
+            example: EUR
+      responses:
+        '200':
+          description: Exchange rate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrencyResponse'
+
+  /api/v1/fetch/{method}/{symbols}:
+    get:
+      tags:
+        - Quote
+      summary: Fetch quotes with specific method
+      operationId: fetchQuotes
+      parameters:
+        - name: method
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: symbols
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Quote data
+
+  /api/v1/db/stats:
+    get:
+      tags:
+        - Database
+      summary: Database statistics
+      description: Get row counts per asset type in the FinanceDatabase
+      operationId: getDbStats
+      responses:
+        '200':
+          description: Database statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DbStatsResponse'
+
+  /api/v1/db/assets:
+    get:
+      tags:
+        - Database
+      summary: List asset types
+      operationId: listAssetTypes
+      responses:
+        '200':
+          description: Asset types list
+
+  /api/v1/db/options/{type}:
+    get:
+      tags:
+        - Database
+      summary: Get filter options
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [equities, etfs, funds, indices, currencies, cryptos, moneymarkets]
+      responses:
+        '200':
+          description: Filter options
+
+  /api/v1/search:
+    get:
+      tags:
+        - Database
+      summary: Search assets
+      description: Search for financial assets by name, symbol, or ISIN
+      operationId: searchAssets
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+        - name: primary
+          in: query
+          schema:
+            type: integer
+            enum: [0, 1]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Search results
+
+  /api/v1/lookup/{symbol}:
+    get:
+      tags:
+        - Database
+      summary: Lookup symbol
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Symbol details
+        '404':
+          description: Symbol not found
+
+  /api/v1/filter:
+    get:
+      tags:
+        - Database
+      summary: Filter assets
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [equities, etfs, funds, indices, currencies, cryptos, moneymarkets]
+        - name: sector
+          in: query
+          schema:
+            type: string
+        - name: country
+          in: query
+          schema:
+            type: string
+        - name: exchange
+          in: query
+          schema:
+            type: string
+        - name: market_cap
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Filtered results
+
+  /mcp:
+    post:
+      tags:
+        - MCP
+      summary: MCP JSON-RPC 2.0 endpoint
+      operationId: mcpPost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpRequest'
+      responses:
+        '200':
+          description: MCP response
+    get:
+      tags:
+        - MCP
+      summary: MCP SSE endpoint
+      operationId: mcpGet
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        data:
+          type: object
+          properties:
+            service:
+              type: string
+            version:
+              type: string
+            cache:
+              type: object
+
+    MethodsResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        data:
+          type: object
+
+    QuoteResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        data:
+          type: object
+
+    CurrencyResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        data:
+          type: object
+          properties:
+            from:
+              type: string
+            to:
+              type: string
+            rate:
+              type: number
+
+    DbStatsResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        data:
+          type: object
+
+    McpRequest:
+      type: object
+      required:
+        - jsonrpc
+        - method
+      properties:
+        jsonrpc:
+          type: string
+          enum: ['2.0']
+        id:
+          oneOf:
+            - type: integer
+            - type: string
+            - type: 'null'
+        method:
+          type: string
+        params:
+          type: object
+
+    McpResponse:
+      type: object
+      properties:
+        jsonrpc:
+          type: string
+        id:
+          oneOf:
+            - type: integer
+            - type: string
+            - type: 'null'
+        result:
+          type: object
+        error:
+          type: object
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+
+security:
+  - BearerAuth: []

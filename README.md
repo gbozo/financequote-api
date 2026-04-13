@@ -385,6 +385,6 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 **⭐ If this project helped you, please give it a star!**
 
-Built with ❤️ using Perl, Plack, and Docker
+Built with ❤️ using Perl, Plack, Python and Docker
 
 </div>

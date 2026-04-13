@@ -1261,6 +1261,68 @@ sub {
         return [ 200, [ 'Content-Type' => 'text/html', 'Access-Control-Allow-Origin' => '*' ], [ $html ] ];
     }
     
+    # Serve OpenAPI spec with dynamic server URL and version
+    if ($path eq '/openapi.yaml') {
+        open my $fh, '<', '/app/public/openapi.yaml' or return [ 500, [ 'Content-Type' => 'text/plain' ], [ 'Cannot read file' ] ];
+        my $yaml = do { local $/; <$fh> };
+        close $fh;
+        
+        # Replace {SERVER_URL} with actual host from request
+        my $host = $env->{HTTP_HOST} // $env->{SERVER_NAME} // 'localhost:3001';
+        my $scheme = $env->{'psgi.url_scheme'} // 'http';
+        my $server_url = "$scheme://$host";
+        $yaml =~ s/\{SERVER_URL\}/$server_url/ge;
+        
+        # Replace {FQ_VERSION} with Finance::Quote version
+        my $fq_version = Finance::Quote->VERSION // 'unknown';
+        $yaml =~ s/\{FQ_VERSION\}/$fq_version/ge;
+        
+        return [ 200, [ 'Content-Type' => 'text/yaml', 'Access-Control-Allow-Origin' => '*' ], [ $yaml ] ];
+    }
+    
+    # Serve Swagger UI (redirect to main index)
+    if ($path eq '/swagger' || $path eq '/swagger/') {
+        return [ 302, [ 'Location' => '/', 'Access-Control-Allow-Origin' => '*' ], [ 'Redirecting...' ] ];
+    }
+    
+    # Serve Swagger UI static assets
+    if ($path =~ m{^/swagger/(.+)$}) {
+        my $filename = $1;
+        my $file_path = "/app/public/swagger/$filename";
+        return [ 404, [ 'Content-Type' => 'text/plain', 'Access-Control-Allow-Origin' => '*' ], [ 'Not Found' ] ] unless -e $file_path;
+        
+        my $content_type = 'text/plain';
+        if ($filename =~ /\.js$/) { $content_type = 'application/javascript'; }
+        elsif ($filename =~ /\.css$/) { $content_type = 'text/css'; }
+        elsif ($filename =~ /\.png$/) { $content_type = 'image/png'; }
+        elsif ($filename =~ /\.jpe?g$/) { $content_type = 'image/jpeg'; }
+        elsif ($filename =~ /\.svg$/) { $content_type = 'image/svg+xml'; }
+        elsif ($filename =~ /\.woff2$/) { $content_type = 'font/woff2'; }
+        elsif ($filename =~ /\.woff$/) { $content_type = 'font/woff'; }
+        
+        open my $fh, '<', $file_path or return [ 500, [ 'Content-Type' => 'text/plain' ], [ 'Cannot read file' ] ];
+        my $content = do { local $/; <$fh> };
+        close $fh;
+        return [ 200, [ 'Content-Type' => $content_type, 'Access-Control-Allow-Origin' => '*' ], [ $content ] ];
+    }
+    
+    # Serve static images from public folder
+    if ($path =~ m{^/([^/]+\.(?:jpg|jpeg|png|gif|svg)$)}) {
+        my $file_path = "/app/public/$path";
+        return [ 404, [ 'Content-Type' => 'text/plain', 'Access-Control-Allow-Origin' => '*' ], [ 'Not Found' ] ] unless -e $file_path;
+        
+        my $content_type = 'text/plain';
+        if ($path =~ /\.jpe?g$/) { $content_type = 'image/jpeg'; }
+        elsif ($path =~ /\.png$/) { $content_type = 'image/png'; }
+        elsif ($path =~ /\.gif$/) { $content_type = 'image/gif'; }
+        elsif ($path =~ /\.svg$/) { $content_type = 'image/svg+xml'; }
+        
+        open my $fh, '<', $file_path or return [ 500, [ 'Content-Type' => 'text/plain' ], [ 'Cannot read file' ] ];
+        my $content = do { local $/; <$fh> };
+        close $fh;
+        return [ 200, [ 'Content-Type' => $content_type, 'Access-Control-Allow-Origin' => '*' ], [ $content ] ];
+    }
+    
     # Default: 404 Not Found
     return FQAPI::error_response(404, "Not Found", "Path $path not found");
 };
