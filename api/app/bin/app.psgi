@@ -238,6 +238,50 @@ use Finance::Quote;
         return $response;
     }
 
+# 3b. Symbol Info (metadata)
+    sub handle_info {
+        my ($symbol, $params) = @_;
+        
+        # Build cache key
+        my $method = $params->{method} || 'yahoojson';
+        my $cache_key = "info:${symbol}:${method}";
+        
+        # Check cache
+        my $cached = FQCache::get($cache_key);
+        return $cached if $cached;
+        
+        # Fetch quote - we'll use the stock method to get metadata
+        my %quotes = $quoter->fetch($method, $symbol);
+        
+        # Find the data for this symbol
+        my $info;
+        foreach my $key (keys %quotes) {
+            my ($s, $attr) = split(/$;/, $key, 2);
+            next unless $s eq $symbol;
+            
+            # Only include metadata fields (not price data)
+            if ($attr =~ /^(name|exchange|cap|year_high|year_low|div|yield|eps|pe|volume|avg_vol|day_range|year_range|currency|pct_change|open|close|high|low|date|time|errormsg|success)$/) {
+                $info->{$attr} = $quotes{$key};
+            }
+        }
+        
+        # Add symbol explicitly
+        $info->{symbol} = $symbol;
+        
+        # If no data, mark as failed
+        unless (keys %$info > 1) {
+            $info = {
+                symbol => $symbol,
+                success => 0,
+                errormsg => 'No data returned for symbol',
+            };
+        }
+        
+        my $response = json_response('success', $info);
+        FQCache::set($cache_key, $response);
+        return $response;
+    }
+
 # 4. Currency Conversion
     sub handle_currency {
         my ($from, $to, $params) = @_;
@@ -447,6 +491,24 @@ use Finance::Quote;
                             properties => {},
                         },
                     },
+                    {
+                        name => 'get_symbol_info',
+                        description => 'Get detailed metadata information about a stock symbol (name, exchange, market cap, P/E ratio, dividend, etc.)',
+                        inputSchema => {
+                            type => 'object',
+                            properties => {
+                                symbol => {
+                                    type => 'string',
+                                    description => 'Stock symbol (e.g., AAPL, MSFT)',
+                                },
+                                method => {
+                                    type => 'string',
+                                    description => 'Quote method to use (default: yahoojson)',
+                                },
+                            },
+                            required => ['symbol'],
+                        },
+                    },
                 ],
             });
         }
@@ -523,6 +585,35 @@ use Finance::Quote;
             if ($tool_name eq 'list_methods') {
                 my @methods = @Finance::Quote::MODULES;
                 return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json({ methods => \@methods }) }] });
+            }
+            
+            if ($tool_name eq 'get_symbol_info') {
+                my $symbol = $tool_args->{symbol} // '';
+                my $method = $tool_args->{method} // 'yahoojson';
+                
+                # Build cache key
+                my $cache_key = "info:${symbol}:${method}";
+                my $cached = FQCache::get($cache_key);
+                if ($cached) {
+                    my $body = $cached->[2][0];
+                    my $parsed = decode_json($body);
+                    my $info_data = $parsed->{data};
+                    return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($info_data) }] });
+                }
+                
+                # Fetch info
+                my $response = handle_info($symbol, { method => $method });
+                
+                # Cache the response
+                if ($response->[0] == 200) {
+                    FQCache::set($cache_key, $response);
+                    my $body = $response->[2][0];
+                    my $parsed = decode_json($body);
+                    my $info_data = $parsed->{data};
+                    return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($info_data) }] });
+                }
+                
+                return jsonrpc_error($id, -3201, "Symbol info failed", "Cannot get info for $symbol");
             }
             
             return jsonrpc_error($id, -32601, "Method not found", "Unknown tool: $tool_name");
@@ -670,6 +761,11 @@ sub {
     # Route: /api/v1/quote/:symbols
     if ($path =~ m{^/api/v1/quote/([^/]+)$}) {
         return FQAPI::handle_quote($1, \%params);
+    }
+    
+    # Route: /api/v1/info/:symbol
+    if ($path =~ m{^/api/v1/info/([^/]+)$}) {
+        return FQAPI::handle_info($1, \%params);
     }
     
     # Route: /api/v1/currency/:from/:to
