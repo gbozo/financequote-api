@@ -6,16 +6,15 @@
 # Docs: http://localhost:3001
 
 services:
-  financequote-api:
+  financequote-api-local:
     # Build from local Dockerfile
     build:
       context: .
       dockerfile: docker/Dockerfile
     image: financequote-api:local
-    container_name: financequote-api
+    container_name: financequote-api-local
     environment:
       - APP_ENV=production
-      - APP_PORT=3001
       - FQ_TIMEOUT=30
       - FQ_FAILOVER=1
       # Target currency for quotes (optional)
@@ -40,7 +39,9 @@ services:
       # - FQ_CACHE_TTL=900       # Cache TTL in seconds (default: 900 = 15 min)
       # - FQ_CACHE_ENABLED=1    # Enable/disable cache (default: 1 = enabled)
     ports:
-      - "3001:3000"
+      - "3002:3000"
+    volumes:
+      - ./app:/app
     # tmpfs for SQLite database (recommended for performance with large datasets)
     tmpfs:
       - /tmp:size=512m,mode=1777
@@ -52,8 +53,8 @@ services:
       retries: 3
       start_period: 10s
     networks:
-      - financequote-net
+      - financequote-net-local
 
 networks:
-  financequote-net:
+  financequote-net-local:
     driver: bridge

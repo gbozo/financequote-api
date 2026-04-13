@@ -26,11 +26,11 @@ FinanceQuote provides a built-in MCP (Model Context Protocol) server that allows
 Connect FinanceQuote to OpenWebUI for natural language queries about stocks and currencies:
 
 <p align="center">
-  <img src="openwebui-mcp.jpeg" alt="OpenWebUI MCP Configuration" width="600"/>
+  <img src="readme-images/openwebui-mcp.jpeg" alt="OpenWebUI MCP Configuration" width="600"/>
 </p>
 
 <p align="center">
-  <img src="openwebui-chat.jpeg" alt="OpenWebUI Chat Example" width="600"/>
+  <img src="readme-images/openwebui-chat.jpeg" alt="OpenWebUI Chat Example" width="600"/>
 </p>
 
 #### OpenWebUI MCP Configuration

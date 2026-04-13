@@ -4,25 +4,25 @@ Quick reference for agents working on this project.
 
 ## Project Overview
 
-- **Purpose**: REST API wrapper for Perl's Finance::Quote library (45+ financial data sources)
-- **Stack**: Perl 5.36+, Plack/PSGI, Starman, Docker
-- **Language**: Primary is Perl (PSGI), client libs in Go/Python/Node
+- **Purpose**: REST API wrapper and MCP server for Perl's Finance::Quote library (45+ financial data sources) and python module FinanceDatabase
+- **Stack**: Perl 5.36+, Plack/PSGI, Starman, Docker, python, sqlite3
+- **Language**: Primary is Perl (PSGI), python for db data import, client libs in Go/Python/Node
 - **License**: MIT
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `api/app/bin/app.psgi` | Main PSGI application - all API logic lives here |
+| `/app/app.psgi` | Main PSGI application - all API logic lives here |
 | `docker-compose.yaml` | Production deployment config |
 | `docker/Dockerfile` | Container build recipe |
-| `.vscode/mcp.json` | VS Code MCP server config example |
+| `mcp.json` | LMStudio MCP server config example |
 
 ## Architecture
 
 ```
 ┌─────────────────┐
-│  Starman (8080) │  ← Production HTTP server
+│  Starman (3000) │  ← Production HTTP server
 └────────┬────────┘
          │
 ┌────────▼────────┐
@@ -141,7 +141,7 @@ if ($tool_name eq 'my_tool') {
 
 | Variable | Purpose | Required |
 |----------|---------|----------|
-| `FQ_CURRENCY` | Default currency for quotes (e.g., EUR) | No |
+| `FQ_CURRENCY` | Default currency for quotes (e.g., EUR) | Yes |
 | `FQ_CACHE_TTL` | Cache duration in seconds (default: 900) | No |
 | `FQ_CACHE_ENABLED` | 1 or 0 to enable/disable cache | No |
 | `API_AUTH_KEYS` | Comma-separated API keys for auth | No |
@@ -150,39 +150,26 @@ if ($tool_name eq 'my_tool') {
 
 ## Testing Locally
 
+Local Containers runs at port 3002, app runs on port 3000 inside
+
 ```bash
-# Use docker-compose.local.yaml for local development (builds from local Dockerfile)
-docker compose -f docker-compose.local.yaml up -d
+# Use make in project root to see all options
+	make # see help
+	make buildlocal    # Build Local Docker image
+	make uplocal       # Start development environment
+	make uplocalnotdetached # Start development environment with not detached console
+	make downlocal     # Stop local container
+	make restartlocal  # Restart local container (needed if editing psgi)
+	make logslocal     # View local container logs
+	make healthlocal   # Check local container API health
+	make cleanlocal   # Stops and removes local container
+	make testlocal    # Test local API endpoint (/api/v1/methods)
+	make testlocalmethods:  # Test local API endpoint (/api/v1/methods)
+	make testlocalquote:    # Test local API endpoint (/api/v1/quote)
+	make testlocalinfo:     # Test local API endpoint (/api/v1/info)
+	make testlocalcurrency: # Test local API endpoint (/api/v1/currency)
+	make testlocalmcp:      # Test local API endpoint (/mcp)
 
-# Health check
-curl http://localhost:3001/api/v1/health
-
-# Get quote
-curl http://localhost:3001/api/v1/quote/AAPL
-
-# Get symbol info (new in v1.0.12)
-curl http://localhost:3001/api/v1/info/AAPL
-
-# Currency
-curl http://localhost:3001/api/v1/currency/USD/EUR
-
-# Test MCP endpoint
-curl -X POST http://localhost:3001/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
-```
-
-## Docker Workflow
-
-| File | Use | Command |
-|------|-----|---------|
-| `docker-compose.yaml` | Production (uses official image) | `docker compose -f docker-compose.yaml up -d` |
-| `docker-compose.local.yaml` | Local development (builds from local Dockerfile) | `docker compose -f docker-compose.local.yaml up -d` |
-
-To build and push official image:
-```bash
-docker compose -f docker-compose.local.yaml build
-docker push ghcr.io/gbozo/financequote-api:latest
 ```
 
 ## Common Pitfalls
@@ -204,13 +191,16 @@ These are generated/updated independently - they're not part of the Docker build
 
 ## Release Process
 
+1. Ask user before tag and release unless instructed to wrap up or not to ask anymore in this session.
+2. Always update documents like TASKS.md, SPEC.md and README.md before releasing and there are changes or functionality that must be documented.
+
 ```bash
 # 1. Make changes
 git add -A
 git commit -m "Description"
 
 # 2. Tag and push
-git tag v1.0.x
+git tag v1.x.x
 git push origin main --tags
 
 # 3. Create GitHub release

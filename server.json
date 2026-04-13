@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.financequote.api",
   "title": "FinanceQuote API",
-  "description": "Fetch stock quotes, currency rates, and financial data from 45+ global sources",
+  "description": "Fetch stock quotes, currency rates, and financial data from 45+ global sources and full Global Symbols Database",
   "provider": {
     "name": "FinanceQuote"
   },
@@ -18,7 +18,7 @@
   "license": "MIT",
   "keywords": ["finance", "stock", "quotes", "currency", "forex", "trading"],
   "platforms": ["darwin", "win32", "linux"],
-  "runtimes": ["node", "python", "docker"],
+  "runtimes": ["perl", "python", "docker"],
   "tools": [
     {
       "name": "get_quote",
@@ -33,7 +33,7 @@
           "method": {
             "type": "string",
             "description": "Quote method to use (default: yahoojson)",
-            "default": "yahoojson"
+            "default": "yahooJSON"
           },
           "currency": {
             "type": "string",

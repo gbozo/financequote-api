@@ -439,7 +439,7 @@ use Finance::Quote;
         my ($symbols, $params) = @_;
         
         # Build cache key
-        my $method = $params->{method} || 'yahoojson';
+        my $method = $params->{method} || 'yahooJSON';
         my $currency = $params->{currency} || '';
         my $cache_key = "quote:${symbols}:${method}:${currency}";
         
@@ -485,7 +485,7 @@ use Finance::Quote;
         my ($symbol, $params) = @_;
         
         # Build cache key
-        my $method = $params->{method} || 'yahoojson';
+        my $method = $params->{method} || 'yahooJSON';
         my $cache_key = "info:${symbol}:${method}";
         
         # Check cache
@@ -565,7 +565,7 @@ use Finance::Quote;
         
         # Fallback: Try general approach with FQ_CURRENCY setting
         my @pairs = ("$from$to");
-        my %quotes = $quoter->fetch('yahoojson', @pairs);
+        my %quotes = $quoter->fetch('yahooJSON', @pairs);
         
         my $rate;
         foreach my $k (keys %quotes) {
@@ -697,7 +697,7 @@ use Finance::Quote;
                                 },
                                 method => {
                                     type => 'string',
-                                    description => 'Quote method to use (default: yahoojson)',
+                                    description => 'Quote method to use (default: yahooJSON)',
                                 },
                                 currency => {
                                     type => 'string',
@@ -745,7 +745,7 @@ use Finance::Quote;
                                 },
                                 method => {
                                     type => 'string',
-                                    description => 'Quote method to use (default: yahoojson)',
+                                    description => 'Quote method to use (default: yahooJSON)',
                                 },
                             },
                             required => ['symbol'],
@@ -843,7 +843,7 @@ use Finance::Quote;
             
             if ($tool_name eq 'get_quote') {
                 my $symbols = $tool_args->{symbols} // '';
-                my $method = $tool_args->{method} // 'yahoojson';
+                my $method = $tool_args->{method} // 'yahooJSON';
                 my $currency = $tool_args->{currency} // '';
                 
                 # Build cache key
@@ -913,7 +913,7 @@ use Finance::Quote;
             
             if ($tool_name eq 'get_symbol_info') {
                 my $symbol = $tool_args->{symbol} // '';
-                my $method = $tool_args->{method} // 'yahoojson';
+                my $method = $tool_args->{method} // 'yahooJSON';
                 
                 # Build cache key
                 my $cache_key = "info:${symbol}:${method}";
@@ -1020,7 +1020,7 @@ use Finance::Quote;
         }
         
         my @pairs = ("$from$to");
-        my %quotes = $quoter->fetch('yahoojson', @pairs);
+        my %quotes = $quoter->fetch('yahooJSON', @pairs);
         my $rate;
         foreach my $k (keys %quotes) {
             my $v = $quotes{$k};

@@ -2,11 +2,7 @@ name: Build and Release
 
 on:
   release:
-    types: [published]
-  push:
-    branches: [main]
-    tags:
-      - 'v*'
+    types: [published]  
 
 jobs:
   build-and-push:

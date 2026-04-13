@@ -3,8 +3,8 @@
 
 FROM debian:bookworm-slim
 
-LABEL maintainer="financequote@example.com"
-LABEL description="Finance::Quote REST API"
+LABEL maintainer="4042540+gbozo@users.noreply.github.com"
+LABEL description="FinanceQuote API"
 LABEL version="1.0"
 
 # Install system dependencies
@@ -28,13 +28,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cron \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python packages
-RUN python3 -m pip install --no-cache-dir --break-system-packages financedatabase
-
-# Install cpanm and all Perl dependencies including Finance::Quote
-RUN curl -sL https://cpanmin.us | perl - App::cpanminus && \
+# Install Python packages, cpanm and all Perl dependencies including Finance::Quote
+RUN python3 -m pip install --no-cache-dir --break-system-packages financedatabase && \
+    curl -sL https://cpanmin.us | perl - App::cpanminus && \
     cpanm --notest Plack Starman JSON::XS String::Util HTML::TableExtract Web::Scraper Text::Template Date::Manip Time::Piece Date::Parse && \
-    cpanm --notest Finance::Quote DBD::SQLite
+    cpanm --notest Finance::Quote Finance::Quote::BVB DBD::SQLite
 
 # Create app user
 RUN groupadd -g 1000 appgroup && useradd -m -u 1000 -g appgroup appuser
@@ -45,11 +43,8 @@ RUN cp -r /root/.cpanm /opt/perl && chmod -R a+rX /opt/perl
 # Create directory structure  
 WORKDIR /app
 
-# Copy API application
-COPY ../api/app/bin/app.psgi /app/app.psgi
-
-# Copy public documentation
-COPY ../api/app/public /app/public
+# Copy App folder
+COPY ../app/ /app
 
 # Copy cron scripts
 COPY ../cron-scripts /usr/local/bin/
