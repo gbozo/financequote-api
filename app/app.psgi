@@ -9,6 +9,7 @@ use strict;
 use warnings;
 use utf8;
 use JSON::XS qw(encode_json decode_json);
+use Encode qw(encode_utf8);
 
 use lib 'lib';
 use FQCache;
@@ -641,6 +642,9 @@ use Finance::Quote;
             db_info    => $db_info,
         );
 
+        # Encode SVG to UTF-8 bytes (PSGI requires byte strings, not wide characters)
+        $svg = encode_utf8($svg);
+
         # Return in requested format
         if ($format eq 'json') {
             require MIME::Base64;
@@ -667,7 +671,7 @@ use Finance::Quote;
 
         # Default: raw SVG
         return [ 200, [
-            'Content-Type' => 'image/svg+xml',
+            'Content-Type' => 'image/svg+xml; charset=utf-8',
             'Access-Control-Allow-Origin' => '*',
             'Cache-Control' => 'public, max-age=300',
         ], [ $svg ] ];

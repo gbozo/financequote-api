@@ -10,6 +10,7 @@ package FQMCP;
 use strict;
 use warnings;
 use JSON::XS qw(encode_json);
+use Encode qw(encode_utf8);
 
 use FQUtils;
 use FQCache;
@@ -536,6 +537,9 @@ sub _handle_tool_call {
             info       => $info,
             db_info    => $db_info,
         );
+
+        # Encode SVG to UTF-8 bytes before base64 encoding
+        $svg = encode_utf8($svg);
 
         require MIME::Base64;
         my $b64 = MIME::Base64::encode_base64($svg, '');
