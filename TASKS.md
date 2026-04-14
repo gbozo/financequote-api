@@ -106,10 +106,15 @@ Comprehensive MCP protocol enrichment: composite tools, discovery tools, resourc
 - [x] **`market_screener`** - Market screening prompt. Uses `get_filter_options` + `filter_assets` + `get_portfolio` to find and price stocks matching sector/country/market cap criteria.
 - [x] **`currency_check`** - Quick forex lookup prompt. Uses `get_currency` and presents rate with 1/10/100/1000 conversion examples.
 
+### MCP Module Extraction
+
+- [x] **FQMCP.pm** - Extracted all MCP logic from app.psgi into dedicated `app/lib/FQMCP.pm` module (~790 lines). Includes JSON-RPC dispatch, tool definitions/handlers, resource definitions/reader, prompt definitions/handler. Configured at startup via `FQMCP::configure()` with references to shared `_fetch_*_data()` functions. app.psgi reduced from 1164 to 444 lines.
+- [x] **app.psgi** - `handle_mcp()` now delegates to `FQMCP::handle($body)`. Developers add REST handlers in app.psgi, MCP tools/resources/prompts in FQMCP.pm.
+
 ### Documentation Updates
 
 - [x] **README.md** - Updated MCP section with all 13 tools in categorized table, 3 resources, 4 prompts, new curl examples, Claude Desktop and OpenCode/Cursor config examples.
-- [x] **AGENTS.md** - Added MCP tool description guidelines, MCP resources section, MCP prompts section, MCP tool categories table.
+- [x] **AGENTS.md** - Architecture diagram updated with FQMCP module. Module responsibilities section includes FQMCP. MCP tool/prompt patterns reference FQMCP.pm.
 - [x] **TASKS.md** - This section documenting all MCP enrichments.
 
 ### Files Changed

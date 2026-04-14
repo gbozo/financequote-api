@@ -15,6 +15,7 @@ Quick reference for agents working on this project.
 |------|---------|
 | `/app/app.psgi` | Handler business logic only (FQAPI package) |
 | `/app/lib/FQRouter.pm` | HTTP routing, auth, CORS, static file serving |
+| `/app/lib/FQMCP.pm` | MCP JSON-RPC dispatch, tools, resources, prompts |
 | `/app/lib/FQCache.pm` | In-memory LRU cache with TTL and max size |
 | `/app/lib/FQDB.pm` | SQLite database operations (table-whitelisted) |
 | `/app/lib/FQUtils.pm` | Utilities, JSON helpers, OpenAPI generator, VERSION |
@@ -38,21 +39,25 @@ Quick reference for agents working on this project.
 └────────┬────────┘
          │
 ┌────────▼────────┐
-│  FQAPI package  │  ← Handler business logic (handle_quote, handle_mcp, etc.)
+│  FQAPI package  │  ← REST handler business logic (handle_quote, handle_info, etc.)
 └────────┬────────┘
          │
-    ┌────┴────┐
-    │         │
-┌───▼───┐ ┌──▼──┐
-│Finance│ │FQDB │  ← CPAN quote fetching / SQLite FinanceDatabase
-│::Quote│ │     │
-└───────┘ └─────┘
+    ┌────┼────────┐
+    │    │        │
+┌───▼──┐│┌───────▼──────┐
+│Finance│││    FQMCP     │  ← MCP JSON-RPC: tools, resources, prompts
+│::Quote│││              │
+└───────┘│└──────┬───────┘
+    ┌────▼────┐  │
+    │  FQDB   │◄─┘  ← SQLite FinanceDatabase
+    └─────────┘
 ```
 
 ### Module Responsibilities
 
-- **app.psgi**: Contains the `FQAPI` package with all handler functions. Developers add new features here. The Plack builder at the bottom just wires `FQRouter::dispatch()`.
+- **app.psgi**: Contains the `FQAPI` package with REST handler functions and shared `_fetch_*_data()` core logic. Developers add new REST features here. The Plack builder at the bottom just wires `FQRouter::dispatch()`.
 - **FQRouter.pm**: All HTTP plumbing - route regex matching, auth checking, CORS headers, static file serving, query string parsing. Developers should rarely need to touch this.
+- **FQMCP.pm**: All MCP (Model Context Protocol) logic - JSON-RPC dispatch, tool definitions/handlers, resource definitions/reader, prompt definitions/handler. Configured at startup with references to shared `_fetch_*_data()` functions from FQAPI.
 - **FQCache.pm**: In-memory key/value cache with configurable TTL, max entry limit, and LRU eviction. Stores full PSGI response arrays.
 - **FQDB.pm**: SQLite interface for FinanceDatabase data. Uses table name whitelisting to prevent SQL injection.
 - **FQUtils.pm**: Shared utilities - JSON response builders, `jsonrpc_response`/`jsonrpc_error`, OpenAPI spec generator, `sanitize_input()`, and the single `$VERSION` constant.
@@ -175,7 +180,7 @@ if ($path =~ m{^/api/v1/newfeature/([^/]+)$}) {
 ### Pattern for MCP Tool
 
 ```perl
-# 1. Add tool definition in _mcp_tool_definitions() (app.psgi)
+# 1. Add tool definition in _tool_definitions() (FQMCP.pm)
 {
     name => 'my_tool',
     description => 'What it does. Returns: field1, field2. Example: my_tool({param1: "value"})',
@@ -188,11 +193,11 @@ if ($path =~ m{^/api/v1/newfeature/([^/]+)$}) {
     },
 }
 
-# 2. Add handler in _handle_mcp_tool_call() (app.psgi)
+# 2. Add handler in _handle_tool_call() (FQMCP.pm)
 if ($tool_name eq 'my_tool') {
     my $arg = $tool_args->{param1};
-    # ... logic (reuse _fetch_*_data() functions where possible)
-    return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($result) }] });
+    # ... logic (use $fetch_quotes_fn->(), $fetch_info_fn->(), $fetch_currency_fn->() for data)
+    return _jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($result) }] });
 }
 ```
 
@@ -228,7 +233,7 @@ Resources provide static/semi-static data that agents can read without tool call
 Prompts provide pre-built conversation templates that guide agents through common workflows:
 
 ```perl
-# Prompts are defined in _mcp_prompt_definitions() and handled in _handle_mcp_prompt_get()
+# Prompts are defined in _prompt_definitions() and handled in _handle_prompt_get() in FQMCP.pm
 # Current prompts:
 #   analyze_stock        - Comprehensive stock analysis with structured output
 #   compare_investments  - Side-by-side investment comparison
@@ -246,6 +251,7 @@ Core data-fetching functions are shared to avoid duplication:
 - `_fetch_currency_data($from, $to)` - handles currency conversion with fallbacks
 
 Both REST handlers and MCP tool handlers call these same functions.
+FQMCP receives references to these functions via `FQMCP::configure()` at startup.
 
 ## Environment Variables
 
