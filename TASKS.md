@@ -198,6 +198,80 @@ Fixed critical data import issue: the import script used a one-size-fits-all equ
 
 ---
 
+## v1.73 - SQLite Cache + Quote History
+
+Replaced in-memory cache with SQLite-backed `quotes_cache` table and added permanent `quotes_history` table for daily quote snapshots with searchable columns. Persistent storage via Docker volumes replaces tmpfs.
+
+### SQLite Cache (`FQCache.pm`)
+
+- [x] **Complete rewrite** - FQCache now uses SQLite `quotes_cache` table instead of in-memory hash.
+  - Schema: `cache_key TEXT PRIMARY KEY, status INTEGER, headers TEXT (JSON), body TEXT, expires_at INTEGER, created_at INTEGER`
+  - Index on `expires_at` for efficient cleanup
+  - `_get_dbh()` with reconnect-on-failure, WAL mode, busy_timeout=30s
+  - `get()` deletes expired entries on access
+  - `set()` validates PSGI array structure, stores status/headers(JSON)/body separately
+  - `purge_expired()` for cron-based cleanup
+  - `stats()` returns `{enabled, ttl, entries, expired, backend:'sqlite'}`
+
+### Quote History (`FQDB.pm`)
+
+- [x] **`quotes_history` table** - Permanent per-symbol per-day records with searchable columns:
+  - Columns: symbol, date, name, exchange, currency, open, close, high, low, last, volume, change, p_change, pe, eps, div, yield, cap, year_high, year_low, day_range, year_range, method, fetched_at
+  - `UNIQUE(symbol, date, method)` constraint for deduplication
+  - Indexes: idx_history_symbol, idx_history_date, idx_history_symbol_date
+- [x] **`init_history_table()`** - Creates table and indexes at startup
+- [x] **`record_quote($symbol, $data, $method)`** - INSERT OR REPLACE single record
+- [x] **`record_quotes($quotes_hash, $method)`** - Batch record from quote hash (skips non-success)
+- [x] **`get_history(%opts)`** - Query by symbol, from, to, limit, method
+- [x] **`get_history_symbols()`** - Returns symbols with day counts and date ranges
+- [x] **`history_stats()`** - Total records, symbols, date range
+
+### Automatic Recording (`app.psgi`)
+
+- [x] **`_fetch_quotes_data()`** now calls `FQDB::record_quotes()` after every fetch
+- [x] **`_fetch_info_data()`** now calls `FQDB::record_quote()` for successful fetches
+- [x] Both wrapped in `eval {}` so recording failures never break the request
+
+### REST API Endpoints
+
+- [x] **`GET /api/v1/history/{symbol}`** - Query historical data with optional from/to/limit/method params
+- [x] **`GET /api/v1/history`** - Overview of all tracked symbols with date ranges and record counts
+
+### MCP Tools (`FQMCP.pm`)
+
+- [x] **`get_price_history`** - Query historical quote data by symbol with date range and limit
+- [x] **`get_history_overview`** - Overview of all symbols with historical data
+
+### Container Changes
+
+- [x] **Persistent storage** - Docker volumes replace tmpfs for SQLite database
+  - `fq-data:/data` in docker-compose.yaml (production)
+  - `fq-data-local:/data` in docker-compose.local.yaml (development)
+- [x] **Conditional first-run import** - Dockerfile CMD checks if DB exists/has data before running import. Subsequent starts skip the import.
+- [x] **Default DB path changed** - `/data/finance_database.db` (was `/tmp/finance_database.db`)
+- [x] **`FQ_DB_PATH` env var standardized** - All components use `FQ_DB_PATH` (was inconsistent `FINANCE_DB_PATH`)
+- [x] **`cleanup-cache` cron job** - Purges expired `quotes_cache` entries every hour
+- [x] **`sqlite3` CLI added** - Installed in container for cache cleanup script
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `app/lib/FQCache.pm` | Complete rewrite: SQLite backend, quotes_cache table |
+| `app/lib/FQDB.pm` | Added quotes_history table, record/query functions |
+| `app/app.psgi` | Auto-recording in fetch functions, history handlers, FQ_DB_PATH |
+| `app/lib/FQRouter.pm` | Added /api/v1/history routes |
+| `app/lib/FQMCP.pm` | Added get_price_history and get_history_overview tools |
+| `docker/Dockerfile` | Conditional import, /data dir, sqlite3 CLI, chmod scripts |
+| `docker-compose.yaml` | Persistent volume, FQ_DB_PATH env, removed tmpfs |
+| `docker-compose.local.yaml` | Persistent volume, FQ_DB_PATH env, removed tmpfs |
+| `cron-scripts/cleanup-cache` | **NEW** - hourly cache expiry cleanup |
+| `cron-scripts/financequote.cron` | Added cleanup-cache hourly job |
+| `cron-scripts/import_financedatabase.py` | FQ_DB_PATH env var, /data default |
+| `AGENTS.md` | Updated cache, history, cron, env vars, MCP tools docs |
+
+---
+
 ## Previous Tasks (v1.0 - v1.69)
 
 ### Core Infrastructure

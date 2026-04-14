@@ -36,11 +36,13 @@ services:
       # Cache settings (optional)
       # - FQ_CACHE_TTL=900       # Cache TTL in seconds (default: 900 = 15 min)
       # - FQ_CACHE_ENABLED=1    # Enable/disable cache (default: 1 = enabled)
+      
+      # Database path (optional - default: /data/finance_database.db)
+      # - FQ_DB_PATH=/data/finance_database.db
     ports:
       - "3001:3000"
-    # tmpfs for SQLite database (recommended for performance with large datasets)
-    tmpfs:
-      - /tmp:size=512m,mode=1777
+    volumes:
+      - fq-data:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/v1/health"]
@@ -50,6 +52,10 @@ services:
       start_period: 10s
     networks:
       - financequote-net
+
+volumes:
+  fq-data:
+    driver: local
 
 networks:
   financequote-net:

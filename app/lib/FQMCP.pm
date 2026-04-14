@@ -432,6 +432,38 @@ sub _handle_tool_call {
         return _jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($stats) }] });
     }
 
+    # --- History tools ---
+
+    if ($tool_name eq 'get_price_history') {
+        my $symbol = $tool_args->{symbol} // '';
+
+        return _jsonrpc_error($id, -32602, "Invalid params",
+            "symbol is required. Example: AAPL")
+            unless $symbol;
+
+        my $history = FQDB::get_history(
+            symbol => $symbol,
+            from   => $tool_args->{from},
+            to     => $tool_args->{to},
+            limit  => $tool_args->{limit} // 365,
+            method => $tool_args->{method},
+        );
+        return _jsonrpc_response($id, { content => [{ type => 'text', text => encode_json({
+            symbol  => uc($symbol),
+            records => $history,
+            count   => scalar(@$history),
+        }) }] });
+    }
+
+    if ($tool_name eq 'get_history_overview') {
+        my $symbols = FQDB::get_history_symbols();
+        my $stats   = FQDB::history_stats();
+        return _jsonrpc_response($id, { content => [{ type => 'text', text => encode_json({
+            symbols => $symbols,
+            stats   => $stats,
+        }) }] });
+    }
+
     return _jsonrpc_error($id, -32601, "Tool not found",
         "Unknown tool: $tool_name. Use tools/list to see available tools.");
 }
@@ -584,6 +616,27 @@ sub _tool_definitions {
         {
             name => 'get_asset_types',
             description => 'List all available asset types in the database with descriptions, row counts, and available filter columns for each type. Returns: { types: [{name, description, filters: [...]}], stats: {equities: N, etfs: N, ...} }. Call this first to understand what data is available and what filters apply to each type.',
+            inputSchema => { type => 'object', properties => {} },
+        },
+        # --- History tools ---
+        {
+            name => 'get_price_history',
+            description => 'Get historical quote data for a symbol. Returns daily records (close, open, high, low, volume, PE, yield, cap, etc.) from previous fetches. Data accumulates over time as quotes are fetched. Use from/to for date ranges. Returns: { symbol, records: [{date, close, open, high, low, volume, pe, yield, cap, ...}], count }. Example: symbol="AAPL", from="2024-01-01"',
+            inputSchema => {
+                type => 'object',
+                properties => {
+                    symbol => { type => 'string',  description => 'Ticker symbol (e.g., AAPL, MSFT)' },
+                    from   => { type => 'string',  description => 'Start date (YYYY-MM-DD). Example: "2024-01-01"' },
+                    to     => { type => 'string',  description => 'End date (YYYY-MM-DD). Example: "2024-12-31"' },
+                    limit  => { type => 'integer', description => 'Max records (default: 365)' },
+                    method => { type => 'string',  description => 'Filter by data source method' },
+                },
+                required => ['symbol'],
+            },
+        },
+        {
+            name => 'get_history_overview',
+            description => 'Get an overview of all symbols with historical data. Returns list of symbols with their date ranges and number of daily records. Useful to see what historical data is available before querying get_price_history.',
             inputSchema => { type => 'object', properties => {} },
         },
         # --- Utility tools ---

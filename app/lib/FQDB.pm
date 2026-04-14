@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use DBI;
 
-my $db_path = '/tmp/finance_database.db';
+my $db_path = $ENV{'FQ_DB_PATH'} // '/data/finance_database.db';
 my $dbh;
 
 # Whitelist of valid table names to prevent SQL injection
@@ -356,6 +356,218 @@ sub get_filter_columns {
     $type = _validate_table($type // '');
     return [] unless $type;
     return $FILTER_COLUMNS{$type} // [];
+}
+
+# ============================================
+# Quotes History - per-symbol per-day records
+# ============================================
+
+sub init_history_table {
+    my $db = get_connection();
+    return unless $db;
+
+    $db->do(q{
+        CREATE TABLE IF NOT EXISTS quotes_history (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol      TEXT NOT NULL,
+            date        TEXT NOT NULL,
+            name        TEXT,
+            exchange    TEXT,
+            currency    TEXT,
+            open        REAL,
+            close       REAL,
+            high        REAL,
+            low         REAL,
+            last        REAL,
+            volume      REAL,
+            change      REAL,
+            p_change    REAL,
+            pe          REAL,
+            eps         REAL,
+            div         REAL,
+            yield       REAL,
+            cap         REAL,
+            year_high   REAL,
+            year_low    REAL,
+            day_range   TEXT,
+            year_range  TEXT,
+            method      TEXT,
+            fetched_at  INTEGER NOT NULL,
+            UNIQUE(symbol, date, method)
+        )
+    });
+    $db->do("CREATE INDEX IF NOT EXISTS idx_history_symbol ON quotes_history(symbol)");
+    $db->do("CREATE INDEX IF NOT EXISTS idx_history_date ON quotes_history(date)");
+    $db->do("CREATE INDEX IF NOT EXISTS idx_history_symbol_date ON quotes_history(symbol, date)");
+}
+
+sub record_quote {
+    my ($symbol, $data, $method) = @_;
+    return unless $symbol && $data && ref($data) eq 'HASH';
+
+    my $db = get_connection();
+    return unless $db;
+
+    # Determine the date: use the date from quote data, or today
+    my $date = $data->{date} // _today();
+    # Normalize date to YYYY-MM-DD if possible
+    $date = _normalize_date($date);
+
+    my $now = time;
+
+    $db->do(q{
+        INSERT OR REPLACE INTO quotes_history
+        (symbol, date, name, exchange, currency, open, close, high, low, last,
+         volume, change, p_change, pe, eps, div, yield, cap,
+         year_high, year_low, day_range, year_range, method, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    }, undef,
+        $symbol,
+        $date,
+        $data->{name},
+        $data->{exchange},
+        $data->{currency},
+        _to_num($data->{open}),
+        _to_num($data->{close}),
+        _to_num($data->{high}),
+        _to_num($data->{low}),
+        _to_num($data->{last}),
+        _to_num($data->{volume}),
+        _to_num($data->{change}),
+        _to_num($data->{p_change} // $data->{pct_change}),
+        _to_num($data->{pe}),
+        _to_num($data->{eps}),
+        _to_num($data->{div}),
+        _to_num($data->{yield}),
+        _to_num($data->{cap}),
+        _to_num($data->{year_high}),
+        _to_num($data->{year_low}),
+        $data->{day_range},
+        $data->{year_range},
+        $method // 'unknown',
+        $now,
+    );
+}
+
+sub record_quotes {
+    my ($quotes_hash, $method) = @_;
+    return unless $quotes_hash && ref($quotes_hash) eq 'HASH';
+
+    for my $sym (keys %$quotes_hash) {
+        my $data = $quotes_hash->{$sym};
+        next unless ref($data) eq 'HASH';
+        next unless $data->{success};
+        record_quote($sym, $data, $method);
+    }
+}
+
+sub get_history {
+    my (%opts) = @_;
+    my $symbol = uc($opts{symbol} // '');
+    my $from   = $opts{from};     # YYYY-MM-DD
+    my $to     = $opts{to};       # YYYY-MM-DD
+    my $limit  = $opts{limit} // 365;
+    my $method = $opts{method};
+
+    return [] unless $symbol;
+
+    my $db = get_connection();
+    return [] unless $db;
+
+    my @conditions = ("symbol = ?");
+    my @params = ($symbol);
+
+    if ($from) {
+        push @conditions, "date >= ?";
+        push @params, $from;
+    }
+    if ($to) {
+        push @conditions, "date <= ?";
+        push @params, $to;
+    }
+    if ($method) {
+        push @conditions, "method = ?";
+        push @params, $method;
+    }
+
+    push @params, $limit;
+
+    my $where = join(" AND ", @conditions);
+    my $sth = $db->prepare(
+        "SELECT symbol, date, name, exchange, currency, open, close, high, low, last, " .
+        "volume, change, p_change, pe, eps, div, yield, cap, year_high, year_low, " .
+        "day_range, year_range, method, fetched_at " .
+        "FROM quotes_history WHERE $where ORDER BY date DESC LIMIT ?"
+    );
+    $sth->execute(@params);
+
+    my @results;
+    while (my $row = $sth->fetchrow_hashref) {
+        push @results, $row;
+    }
+    $sth->finish;
+    return \@results;
+}
+
+sub get_history_symbols {
+    my $db = get_connection();
+    return [] unless $db;
+
+    my $sth = $db->prepare(
+        "SELECT symbol, COUNT(*) as days, MIN(date) as first_date, MAX(date) as last_date " .
+        "FROM quotes_history GROUP BY symbol ORDER BY symbol"
+    );
+    $sth->execute();
+
+    my @results;
+    while (my $row = $sth->fetchrow_hashref) {
+        push @results, $row;
+    }
+    $sth->finish;
+    return \@results;
+}
+
+sub history_stats {
+    my $db = get_connection();
+    return {} unless $db;
+
+    my ($total_records) = $db->selectrow_array("SELECT COUNT(*) FROM quotes_history");
+    my ($total_symbols) = $db->selectrow_array("SELECT COUNT(DISTINCT symbol) FROM quotes_history");
+    my ($min_date) = $db->selectrow_array("SELECT MIN(date) FROM quotes_history");
+    my ($max_date) = $db->selectrow_array("SELECT MAX(date) FROM quotes_history");
+
+    return {
+        total_records => $total_records // 0,
+        total_symbols => $total_symbols // 0,
+        date_range    => { from => $min_date, to => $max_date },
+    };
+}
+
+sub _to_num {
+    my ($val) = @_;
+    return undef unless defined $val;
+    # Strip commas and non-numeric chars (except .-+)
+    $val =~ s/[,\s]//g if $val;
+    return undef unless defined $val && $val =~ /^-?[\d.]+(?:e[+-]?\d+)?$/i;
+    return $val + 0;
+}
+
+sub _today {
+    my @t = localtime(time);
+    return sprintf("%04d-%02d-%02d", $t[5]+1900, $t[4]+1, $t[3]);
+}
+
+sub _normalize_date {
+    my ($date) = @_;
+    return _today() unless $date;
+    # Already YYYY-MM-DD
+    return $date if $date =~ /^\d{4}-\d{2}-\d{2}$/;
+    # MM/DD/YYYY -> YYYY-MM-DD
+    if ($date =~ m{^(\d{1,2})/(\d{1,2})/(\d{4})$}) {
+        return sprintf("%04d-%02d-%02d", $3, $1, $2);
+    }
+    # DD-Mon-YYYY or similar - just use today
+    return _today();
 }
 
 1;

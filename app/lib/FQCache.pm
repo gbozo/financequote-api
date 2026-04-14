@@ -1,97 +1,133 @@
 package FQCache;
 
+# SQLite-backed cache with TTL.
+# Replaces the previous in-memory hash cache.
+# Survives container restarts (persistent volume).
+# Stale entries are cleaned by cron; also cleaned on get().
+
 use strict;
 use warnings;
+use JSON::XS qw(encode_json decode_json);
+use DBI;
 
-my %cache;
-my %access_time;     # LRU tracking: key => last access timestamp
 my $ttl = 900;
 my $enabled = 1;
-my $max_entries = 10000;  # Default max cache entries
+my $db_path;
+my $dbh;
 
 sub configure {
-    my ($env_ttl, $env_enabled, $env_max) = @_;
+    my ($env_ttl, $env_enabled, $env_db_path) = @_;
     if (defined $env_ttl && $env_ttl =~ /^\d+$/) {
         $ttl = $env_ttl;
     }
     $enabled = defined $env_enabled ? $env_enabled : 1;
-    if (defined $env_max && $env_max =~ /^\d+$/ && $env_max > 0) {
-        $max_entries = $env_max;
+    $db_path = $env_db_path // '/data/finance_database.db';
+    _init_table();
+}
+
+sub _get_dbh {
+    if ($dbh) {
+        my $ok = eval { $dbh->do("SELECT 1"); 1 };
+        return $dbh if $ok;
+        eval { $dbh->disconnect };
+        $dbh = undef;
     }
+    $dbh = DBI->connect("dbi:SQLite:dbname=$db_path", "", "", {
+        PrintError => 1,
+        RaiseError => 0,
+    });
+    if ($dbh) {
+        $dbh->do("PRAGMA journal_mode=WAL");
+        $dbh->do("PRAGMA busy_timeout=30000");
+        $dbh->do("PRAGMA synchronous=NORMAL");
+    }
+    return $dbh;
+}
+
+sub _init_table {
+    my $db = _get_dbh() or return;
+    $db->do(q{
+        CREATE TABLE IF NOT EXISTS quotes_cache (
+            cache_key   TEXT PRIMARY KEY,
+            status      INTEGER NOT NULL,
+            headers     TEXT NOT NULL,
+            body        TEXT NOT NULL,
+            expires_at  INTEGER NOT NULL,
+            created_at  INTEGER NOT NULL
+        )
+    });
+    $db->do("CREATE INDEX IF NOT EXISTS idx_cache_expires ON quotes_cache(expires_at)");
 }
 
 sub get {
     my ($key) = @_;
     return undef unless $enabled;
-    my $entry = $cache{$key};
-    return undef unless $entry;
-    my ($expires, $data) = @$entry;
-    if (time > $expires) {
-        delete $cache{$key};
-        delete $access_time{$key};
+    my $db = _get_dbh() or return undef;
+
+    my $sth = $db->prepare("SELECT status, headers, body, expires_at FROM quotes_cache WHERE cache_key = ?");
+    $sth->execute($key);
+    my $row = $sth->fetchrow_arrayref;
+    $sth->finish;
+    return undef unless $row;
+
+    my ($status, $headers_json, $body, $expires_at) = @$row;
+
+    # Expired - delete and return miss
+    if (time > $expires_at) {
+        $db->do("DELETE FROM quotes_cache WHERE cache_key = ?", undef, $key);
         return undef;
     }
-    $access_time{$key} = time;  # Update LRU timestamp
-    return $data;
+
+    # Reconstruct PSGI response array
+    my $headers = eval { decode_json($headers_json) } // [];
+    return [ $status, $headers, [ $body ] ];
 }
 
 sub set {
     my ($key, $data, $custom_ttl) = @_;
     return unless $enabled;
-    
-    # Evict if at capacity
-    _evict() if scalar(keys %cache) >= $max_entries;
-    
+    return unless $data && ref($data) eq 'ARRAY' && @$data >= 3;
+    my $db = _get_dbh() or return;
+
     my $expire_ttl = $custom_ttl || $ttl;
-    $cache{$key} = [ time + $expire_ttl, $data ];
-    $access_time{$key} = time;
+    my $status     = $data->[0];
+    my $headers    = encode_json($data->[1] // []);
+    my $body       = ref($data->[2]) eq 'ARRAY' ? $data->[2][0] : $data->[2];
+    my $now        = time;
+
+    $db->do(
+        "INSERT OR REPLACE INTO quotes_cache (cache_key, status, headers, body, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        undef, $key, $status, $headers, $body, $now + $expire_ttl, $now
+    );
 }
 
 sub clear {
-    %cache = ();
-    %access_time = ();
+    my $db = _get_dbh() or return;
+    $db->do("DELETE FROM quotes_cache");
+}
+
+sub purge_expired {
+    my $db = _get_dbh() or return 0;
+    my $sth = $db->do("DELETE FROM quotes_cache WHERE expires_at < ?", undef, time);
+    return $sth // 0;
 }
 
 sub stats {
+    my $db = _get_dbh();
+    return { enabled => $enabled, ttl => $ttl, entries => 0, expired => 0, backend => 'sqlite' }
+        unless $db;
+
     my $now = time;
-    my $count = 0;
-    my $expired = 0;
-    foreach my $key (keys %cache) {
-        my $entry = $cache{$key};
-        if ($entry->[0] > $now) {
-            $count++;
-        } else {
-            $expired++;
-        }
-    }
+    my ($total) = $db->selectrow_array("SELECT COUNT(*) FROM quotes_cache");
+    my ($expired) = $db->selectrow_array("SELECT COUNT(*) FROM quotes_cache WHERE expires_at < ?", undef, $now);
+
     return {
         enabled => $enabled,
-        ttl => $ttl,
-        entries => $count,
-        expired => $expired,
-        max_entries => $max_entries,
+        ttl     => $ttl,
+        entries => ($total // 0) - ($expired // 0),
+        expired => $expired // 0,
+        backend => 'sqlite',
     };
-}
-
-sub _evict {
-    my $now = time;
-    
-    # First pass: remove expired entries
-    my @expired;
-    for my $key (keys %cache) {
-        push @expired, $key if $cache{$key}[0] <= $now;
-    }
-    delete @cache{@expired};
-    delete @access_time{@expired};
-    
-    # If still at capacity, evict oldest 10% by LRU
-    if (scalar(keys %cache) >= $max_entries) {
-        my $to_evict = int($max_entries * 0.1) || 1;
-        my @sorted = sort { ($access_time{$a} // 0) <=> ($access_time{$b} // 0) } keys %cache;
-        my @victims = splice(@sorted, 0, $to_evict);
-        delete @cache{@victims};
-        delete @access_time{@victims};
-    }
 }
 
 1;

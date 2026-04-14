@@ -106,17 +106,25 @@ sub dispatch {
             return FQUtils::error_response(400, "Invalid type", "Valid types: " . join(", ", @valid_types));
         }
 
-        my $results = FQDB::filter(
-            type       => $type,
-            sector     => $params->{sector},
-            country    => $params->{country},
-            exchange   => $params->{exchange},
-            market_cap => $params->{market_cap},
-            industry   => $params->{industry},
-            limit      => $params->{limit} // 100,
-        );
+        # Pass all params through to FQDB::filter which validates per-type
+        my %filter_args = (type => $type, limit => $params->{limit} // 100);
+        for my $key (keys %$params) {
+            next if $key eq 'type' || $key eq 'limit';
+            $filter_args{$key} = $params->{$key};
+        }
 
+        my $results = FQDB::filter(%filter_args);
         return FQUtils::json_response('success', { results => $results, count => scalar(@$results) });
+    }
+
+    # --- Quote History endpoints ---
+
+    if ($path =~ m{^/api/v1/history/([^/]+)$}) {
+        return FQAPI::handle_history($1, $params);
+    }
+
+    if ($path eq '/api/v1/history') {
+        return FQAPI::handle_history_overview($params);
     }
 
     # --- MCP Protocol endpoint ---

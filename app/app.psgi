@@ -156,6 +156,22 @@ use Finance::Quote;
         ],
         responses => { '200' => { description => 'Filtered results' } },
     });
+    FQUtils::register_route('/api/v1/history/{symbol}', 'get', {
+        summary => 'Quote History',
+        description => 'Get historical quote data for a symbol (recorded from previous fetches)',
+        params => [
+            { name => 'symbol', in => 'path', required => 1, type => 'string', description => 'Ticker symbol' },
+            { name => 'from', in => 'query', type => 'string', description => 'Start date (YYYY-MM-DD)' },
+            { name => 'to', in => 'query', type => 'string', description => 'End date (YYYY-MM-DD)' },
+            { name => 'limit', in => 'query', type => 'integer', description => 'Max records (default: 365)' },
+        ],
+        responses => { '200' => { description => 'Historical quote records' } },
+    });
+    FQUtils::register_route('/api/v1/history', 'get', {
+        summary => 'History Overview',
+        description => 'Get list of symbols with historical data and date ranges',
+        responses => { '200' => { description => 'Symbols with history stats' } },
+    });
     FQUtils::register_route('/mcp', 'post', {
         summary => 'MCP Endpoint',
         description => 'Model Context Protocol JSON-RPC 2.0 endpoint. Supports: initialize, tools/list, tools/call, resources/list, resources/read, prompts/list, prompts/get, notifications/initialized. 13 tools, 3 resources, 4 prompts available.',
@@ -176,11 +192,14 @@ use Finance::Quote;
     # Configuration
     # ============================================
 
-    # Cache configuration
+    # Cache configuration (SQLite-backed)
     my $FQ_CACHE_TTL = $ENV{'FQ_CACHE_TTL'} // 900;
     my $FQ_CACHE_ENABLED = $ENV{'FQ_CACHE_ENABLED'} // 1;
-    my $FQ_CACHE_MAX = $ENV{'FQ_CACHE_MAX_ENTRIES'} // 10000;
-    FQCache::configure($FQ_CACHE_TTL, $FQ_CACHE_ENABLED, $FQ_CACHE_MAX);
+    my $FQ_DB_PATH = $ENV{'FQ_DB_PATH'} // '/data/finance_database.db';
+    FQCache::configure($FQ_CACHE_TTL, $FQ_CACHE_ENABLED, $FQ_DB_PATH);
+
+    # Initialize quotes history table
+    FQDB::init_history_table();
 
     # Currency configuration
     my $FQ_CURRENCY = $ENV{'FQ_CURRENCY'} // '';
@@ -247,7 +266,12 @@ use Finance::Quote;
         my @syms = split(/,/, $symbols_str);
         $quoter->{currency} = $currency if $currency;
         my %quotes = $quoter->fetch($method, @syms);
-        return process_quote_results(\%quotes, \@syms);
+        my $result = process_quote_results(\%quotes, \@syms);
+
+        # Record to quotes_history (per-symbol per-day)
+        eval { FQDB::record_quotes($result, $method) };
+
+        return $result;
     }
 
     sub handle_quote {
@@ -298,6 +322,12 @@ use Finance::Quote;
                 errormsg => 'No data returned for symbol',
             };
         }
+
+        # Record to quotes_history if we got valid data
+        if ($info->{success}) {
+            eval { FQDB::record_quote($symbol, $info, $method) };
+        }
+
         return $info;
     }
 
@@ -421,6 +451,36 @@ use Finance::Quote;
         my $response = json_response('success', $result);
         FQCache::set($cache_key, $response);
         return $response;
+    }
+
+    # ============================================
+    # Quote History Handlers
+    # ============================================
+
+    sub handle_history {
+        my ($symbol, $params) = @_;
+        my $history = FQDB::get_history(
+            symbol => $symbol,
+            from   => $params->{from},
+            to     => $params->{to},
+            limit  => $params->{limit},
+            method => $params->{method},
+        );
+        return json_response('success', {
+            symbol  => $symbol,
+            records => $history,
+            count   => scalar(@$history),
+        });
+    }
+
+    sub handle_history_overview {
+        my ($params) = @_;
+        my $symbols = FQDB::get_history_symbols();
+        my $stats   = FQDB::history_stats();
+        return json_response('success', {
+            symbols => $symbols,
+            stats   => $stats,
+        });
     }
 
     # ============================================

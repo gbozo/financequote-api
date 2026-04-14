@@ -16,7 +16,7 @@ Quick reference for agents working on this project.
 | `/app/app.psgi` | Handler business logic only (FQAPI package) |
 | `/app/lib/FQRouter.pm` | HTTP routing, auth, CORS, static file serving |
 | `/app/lib/FQMCP.pm` | MCP JSON-RPC dispatch, tools, resources, prompts |
-| `/app/lib/FQCache.pm` | In-memory LRU cache with TTL and max size |
+| `/app/lib/FQCache.pm` | SQLite-backed response cache with TTL |
 | `/app/lib/FQDB.pm` | SQLite database operations (table-whitelisted) |
 | `/app/lib/FQUtils.pm` | Utilities, JSON helpers, OpenAPI generator, VERSION |
 | `docker-compose.yaml` | Production deployment config |
@@ -58,8 +58,8 @@ Quick reference for agents working on this project.
 - **app.psgi**: Contains the `FQAPI` package with REST handler functions and shared `_fetch_*_data()` core logic. Developers add new REST features here. The Plack builder at the bottom just wires `FQRouter::dispatch()`.
 - **FQRouter.pm**: All HTTP plumbing - route regex matching, auth checking, CORS headers, static file serving, query string parsing. Developers should rarely need to touch this.
 - **FQMCP.pm**: All MCP (Model Context Protocol) logic - JSON-RPC dispatch, tool definitions/handlers, resource definitions/reader, prompt definitions/handler. Configured at startup with references to shared `_fetch_*_data()` functions from FQAPI.
-- **FQCache.pm**: In-memory key/value cache with configurable TTL, max entry limit, and LRU eviction. Stores full PSGI response arrays.
-- **FQDB.pm**: SQLite interface for FinanceDatabase data. Uses table name whitelisting, per-type column schemas, and type-aware queries (search, filter, get_filter_options adapt to each asset type's actual columns).
+- **FQCache.pm**: SQLite-backed response cache with configurable TTL. Stores full PSGI response arrays (status, headers as JSON, body). Uses same database file as FQDB (`FQ_DB_PATH`). Expired entries cleaned hourly by cron and on access.
+- **FQDB.pm**: SQLite interface for FinanceDatabase data and quotes history. Uses table name whitelisting, per-type column schemas, and type-aware queries (search, filter, get_filter_options adapt to each asset type's actual columns). Also manages `quotes_history` table for daily quote snapshots.
 - **FQUtils.pm**: Shared utilities - JSON response builders, `jsonrpc_response`/`jsonrpc_error`, OpenAPI spec generator, `sanitize_input()`, and the single `$VERSION` constant.
 
 ## Important Gotchas
@@ -130,8 +130,11 @@ Both REST handler (`handle_currency`) and MCP tool (`get_currency`) call the sam
 ### 6. Python FinanceDatabase module is updated daily via cron in container
 
 See `/cron-scripts/` for the scripts. `financequote.cron` is installed in the container during docker build.
-- `update-financedatabase` updates the FinanceDatabase python module at around midnight
-- 2 hours later, `import_financedatabase.py` refreshes the SQLite DB at `/tmp/finance_database.db` with proper file locking for concurrent access
+- `update-financedatabase` updates the FinanceDatabase python module at 2:00 AM UTC
+- `import_financedatabase.py` refreshes the SQLite DB at 2:30 AM UTC with proper file locking for concurrent access
+- `cleanup-cache` purges expired entries from `quotes_cache` table every hour
+
+The database path defaults to `/data/finance_database.db` (persistent Docker volume). On first container start, the import runs automatically if the DB is empty or missing. Subsequent starts skip the import.
 
 **IMPORTANT**: Each asset type has a DIFFERENT schema. The import script uses per-type `TABLE_SCHEMAS`:
 - **equities**: symbol, name, currency, sector, industry_group, industry, exchange, market, country, state, city, zipcode, website, market_cap, isin, cusip, figi, composite_figi, shareclass_figi, summary
@@ -243,6 +246,7 @@ Resources provide static/semi-static data that agents can read without tool call
 | **Quotes** | `get_quote`, `get_symbol_info`, `get_currency` | Direct Finance::Quote access |
 | **Discovery** | `list_methods`, `get_asset_types`, `get_filter_options` | Help agents understand available data |
 | **Database** | `search_assets`, `lookup_symbol`, `filter_assets`, `get_db_stats` | FinanceDatabase queries |
+| **History** | `get_price_history`, `get_history_overview` | Historical quote data (daily snapshots) |
 
 ### MCP Prompts
 
@@ -277,6 +281,7 @@ FQMCP receives references to these functions via `FQMCP::configure()` at startup
 | `FQ_CACHE_TTL` | Cache duration in seconds (default: 900) | No |
 | `FQ_CACHE_ENABLED` | 1 or 0 to enable/disable cache | No |
 | `FQ_CACHE_MAX_ENTRIES` | Max cache entries before LRU eviction (default: 10000) | No |
+| `FQ_DB_PATH` | SQLite database path (default: /data/finance_database.db) | No |
 | `API_AUTH_KEYS` | Comma-separated API keys for auth | No |
 | `ALPHAVANTAGE_API_KEY` | AlphaVantage API key (for premium data) | No |
 | Other `*_API_KEY` vars | Various provider keys (configured via `%API_KEY_MODULES` loop) | No |
@@ -285,7 +290,7 @@ FQMCP receives references to these functions via `FQMCP::configure()` at startup
 
 Local container runs at port 3002, app runs on port 3000 inside.
 The development container mounts the project's `/app` folder as a volume. Any editing in the app folder does not need a rebuild (unless you add modules). If editing `app.psgi`, a restart is required (`make restartlocal`).
-Every time the container starts it populates the SQLite DB; it takes a couple of seconds to regenerate.
+On first container start, the SQLite DB is populated from FinanceDatabase (takes a few seconds). Subsequent starts skip the import if data exists. The DB is stored on a persistent Docker volume (`/data/`).
 Editing `/cron-scripts` needs `make rebuildlocal`.
 
 ```bash

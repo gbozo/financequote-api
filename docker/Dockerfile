@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
+    sqlite3 \
     cron \
     && rm -rf /var/lib/apt/lists/*
 
@@ -41,6 +42,7 @@ RUN groupadd -g 1000 appgroup && useradd -m -u 1000 -g appgroup appuser
 RUN cp -r /root/.cpanm /opt/perl && chmod -R a+rX /opt/perl
 
 # Create directory structure  
+RUN mkdir -p /data
 WORKDIR /app
 
 # Copy App folder
@@ -48,6 +50,7 @@ COPY ../app/ /app
 
 # Copy cron scripts
 COPY ../cron-scripts /usr/local/bin/
+RUN chmod +x /usr/local/bin/update-financedatabase /usr/local/bin/import_financedatabase.py /usr/local/bin/cleanup-cache
 
 # Copy cron file (before switching to non-root)
 COPY ../cron-scripts/financequote.cron /etc/cron.d/financequote
@@ -57,10 +60,20 @@ RUN chmod 0644 /etc/cron.d/financequote && \
     chown appuser:appgroup /var/log/cron.log
 
 # Fix permissions - make sure lib directory is readable
-RUN chown -R appuser:appgroup /app /var/log/cron.log && chmod -R a+rX /app
+RUN chown -R appuser:appgroup /app /data /var/log/cron.log && chmod -R a+rX /app
 
 # Switch to non-root user
 USER appuser
 
-# Run database import on startup, then cron and plackup
-CMD ["sh", "-c", "python3 /usr/local/bin/import_financedatabase.py && (crontab /etc/cron.d/financequote && exec cron -f) & exec plackup -s Starman -l 0.0.0.0:3000 /app/app.psgi"]
+# Run database import on startup only if DB is empty/missing, then cron and plackup
+CMD ["sh", "-c", "\
+  DB_PATH=\"${FQ_DB_PATH:-/data/finance_database.db}\"; \
+  if [ ! -f \"$DB_PATH\" ] || [ ! -s \"$DB_PATH\" ] || \
+     ! python3 -c \"import sqlite3; c=sqlite3.connect('$DB_PATH'); r=c.execute('SELECT COUNT(*) FROM sqlite_master WHERE type=\\\"table\\\" AND name NOT LIKE \\\"quotes_%\\\"').fetchone(); exit(0 if r[0]>0 else 1)\" 2>/dev/null; then \
+    echo 'First run: importing FinanceDatabase...'; \
+    python3 /usr/local/bin/import_financedatabase.py; \
+  else \
+    echo 'Database exists with data, skipping import.'; \
+  fi && \
+  (crontab /etc/cron.d/financequote && exec cron -f) & \
+  exec plackup -s Starman -l 0.0.0.0:3000 /app/app.psgi"]

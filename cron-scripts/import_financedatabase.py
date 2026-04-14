@@ -22,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Database path - use tmpfs if available, else /tmp
-DB_PATH = os.environ.get('FINANCE_DB_PATH', '/tmp/finance_database.db')
+DB_PATH = os.environ.get('FQ_DB_PATH', '/data/finance_database.db')
 LOCK_PATH = DB_PATH + '.lock'
 
 # Import FinanceDatabase

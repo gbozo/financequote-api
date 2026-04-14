@@ -1,0 +1,15 @@
+#!/bin/bash
+# Cleanup expired cache entries from SQLite quotes_cache table
+# Runs periodically via cron
+
+set -e
+
+DB_PATH="${FQ_DB_PATH:-/data/finance_database.db}"
+
+if [ ! -f "$DB_PATH" ]; then
+    echo "Database not found at $DB_PATH, skipping cache cleanup."
+    exit 0
+fi
+
+DELETED=$(sqlite3 "$DB_PATH" "DELETE FROM quotes_cache WHERE expires_at < strftime('%s','now'); SELECT changes();")
+echo "Cache cleanup at $(date): removed $DELETED expired entries"

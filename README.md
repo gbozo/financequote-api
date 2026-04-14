@@ -193,6 +193,8 @@ services:
       # - ALPHAVANTAGE_API_KEY=   # Optional: premium quotes
     ports:
       - "3001:3000"
+    volumes:
+      - fq-data:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/v1/health"]
@@ -201,6 +203,10 @@ services:
       retries: 3
     networks:
       - financequote-net
+
+volumes:
+  fq-data:
+    driver: local
 
 networks:
   financequote-net:
@@ -254,11 +260,13 @@ Visit **http://localhost:3001** in your browser for:
 | `GET /api/v1/methods` | List available sources | — |
 | `GET /api/v1/fetch/:method/:symbols` | Use specific source | `/api/v1/fetch/yahoojson/AAPL` |
 | `GET /api/v1/health` | Health check | — |
+| `GET /api/v1/history/:symbol` | Historical quote data | `/api/v1/history/AAPL?from=2024-01-01` |
+| `GET /api/v1/history` | History overview (all symbols) | — |
 | `POST /mcp` | MCP Protocol (JSON-RPC 2.0) | See MCP section below |
 
 ### MCP Protocol (for AI Agents)
 
-The MCP endpoint (`POST /mcp`) allows AI agents and LLMs to access financial data via JSON-RPC 2.0. With 13 tools, 3 resources, and 4 prompts, agents can do everything from single quotes to full portfolio analysis in one call.
+The MCP endpoint (`POST /mcp`) allows AI agents and LLMs to access financial data via JSON-RPC 2.0. With 15 tools, 3 resources, and 4 prompts, agents can do everything from single quotes to full portfolio analysis in one call.
 
 ```bash
 # Initialize connection
@@ -304,7 +312,7 @@ curl -X POST http://localhost:3001/mcp \
   -d '{"jsonrpc":"2.0","id":6,"method":"resources/list"}'
 ```
 
-**Available MCP Tools (13):**
+**Available MCP Tools (15):**
 
 | Category | Tool | Description |
 |----------|------|-------------|
@@ -321,6 +329,8 @@ curl -X POST http://localhost:3001/mcp \
 | **Database** | `lookup_symbol` | Look up a specific ticker symbol |
 | **Database** | `filter_assets` | Filter assets by sector, country, exchange, etc. |
 | **Database** | `get_db_stats` | Database statistics and row counts |
+| **History** | `get_price_history` | Historical quote data for a symbol (daily records) |
+| **History** | `get_history_overview` | Overview of all symbols with historical data |
 
 **Available MCP Resources (3):**
 
@@ -396,6 +406,10 @@ CURRENCYFREAKS_API_KEY=
 # App Settings
 APP_PORT=3001
 FQ_TIMEOUT=30
+FQ_CURRENCY=EUR              # Default currency for quotes
+FQ_CACHE_TTL=900             # Cache TTL in seconds (default: 15 min)
+FQ_CACHE_ENABLED=1           # Enable/disable cache
+FQ_DB_PATH=/data/finance_database.db  # SQLite database path
 ```
 
 ## 📚 Client Libraries
