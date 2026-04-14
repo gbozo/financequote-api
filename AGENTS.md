@@ -13,7 +13,10 @@ Quick reference for agents working on this project.
 
 | File | Purpose |
 |------|---------|
-| `/app/app.psgi` | Main PSGI application - all API logic lives here |
+| `/app/app.psgi` | Main PSGI application |
+| `/app/lib/FQCache.pm` | In-memory cache module |
+| `/app/lib/FQDB.pm` | SQLite database operations |
+| `/app/lib/FQUtils.pm` | Utilities + OpenAPI generator |
 | `docker-compose.yaml` | Production deployment config |
 | `docker/Dockerfile` | Container build recipe |
 | `mcp.json` | LMStudio MCP server config example |
@@ -52,18 +55,22 @@ $ENV{'FQ_CURRENCY'} = 'EUR';
 my $quoter = Finance::Quote->new();
 ```
 
-### 2. Finance::Quote Returns Weird Hash Keys
+### 2. Finance::Quote Uses `$;/` Subscript Separator
 
-The module uses `$;` (subscript separator) as a delimiter in hash keys:
+The module uses `$;/` (chr(28), NOT chr(3)) as a delimiter in hash keys:
 
 ```perl
-# Returns keys like: "AAPL price", "AAPL close", "MSFT price", etc.
-my %quotes = $quoter->fetch('yahoojson', 'AAPL', 'MSFT');
+# Returns keys like: "AAPL\x1Chigh", "AAPL\x1Cclose", etc.
+my %quotes = $quoter->fetch('YahooJSON', 'AAPL', 'MSFT');
 
-# To iterate:
+# To iterate - use index() not split() to avoid encoding issues:
 foreach my $key (keys %quotes) {
-    my ($symbol, $attr) = split(/$;/, $key, 2);
-    # $symbol = "AAPL", $attr = "price"
+    my $sep = $;;  # chr(28)
+    my $pos = index($key, $sep);
+    next if $pos < 0;
+    my $symbol = substr($key, 0, $pos);
+    my $attr = substr($key, $pos + 1);
+    # $symbol = "AAPL", $attr = "high"
 }
 ```
 
@@ -71,6 +78,7 @@ foreach my $key (keys %quotes) {
 
 - **NO extra fields** - LM Studio's Zod validation rejects unknown keys (e.g., `timestamp`)
 - **Must implement both POST and GET** for `/mcp` endpoint (GET for SSE fallback)
+- **Use `/mcp/sse` for explicit SSE endpoint**
 - **Use standard JSON-RPC 2.0** - responses must have `jsonrpc`, `id`, `result`/`error`
 
 ### 4. Cache Returns Full PSGI Response Array
@@ -101,9 +109,26 @@ See /cron-scripts/ for the scripts, financequote.cron is the cron installed at t
 Script update-financedatabase update the FinanceDatabse python module at around midnight.
 At a later stage (2 hours later) the sqlite3 db located at /tmp/finance_database.db in the container is refreshed, see import_financedatabse.py, the db is opened with proper locking for concurrent access.
 
-### 7. Finance::Quote methods are case sensitive.
+### 7. Methods Are Case Insensitive
 
-period.
+Use `_normalize_method()` to handle lowercase aliases (e.g., `yahoojson` → `YahooJSON`).
+
+## OpenAPI Auto-Generation
+
+The API includes an auto-generated OpenAPI spec at `/api/v1/spec` (JSON).
+
+To add new endpoints to the spec:
+
+```perl
+FQUtils::register_route('/api/v1/newfeature/{id}', 'get', {
+    summary => 'Get Feature',
+    description => 'Get a specific feature by ID',
+    params => [
+        { name => 'id', in => 'path', required => 1, type => 'string', description => 'Feature ID' },
+    ],
+    responses => { '200' => { description => 'Feature data' } },
+});
+```
 
 ## Adding New Endpoints
 
@@ -117,7 +142,17 @@ sub handle_newfeature {
     return json_response('success', $data);
 }
 
-# 2. Add route in Plack builder
+# 2. Register route for OpenAPI spec (optional but recommended)
+FQUtils::register_route('/api/v1/newfeature/{id}', 'get', {
+    summary => 'Get Feature',
+    description => 'Get a specific feature by ID',
+    params => [
+        { name => 'id', in => 'path', required => 1, type => 'string', description => 'Feature ID' },
+    ],
+    responses => { '200' => { description => 'Feature data' } },
+});
+
+# 3. Add route in Plack builder
 if ($path =~ m{^/api/v1/newfeature/([^/]+)$}) {
     return FQAPI::handle_newfeature($1, \%params);
 }
@@ -183,6 +218,7 @@ Editing /cron-scripts needs make rebuildlocal.
 	make testlocalinfo:     # Test local API endpoint (/api/v1/info)
 	make testlocalcurrency: # Test local API endpoint (/api/v1/currency)
 	make testlocalmcp:      # Test local API endpoint (/mcp)
+	make testlocalspec:    # Test OpenAPI spec endpoint (/api/v1/spec)
 
 ```
 

@@ -31,13 +31,14 @@
 │   ├── docker-compose.yaml     # Orchestration file
 │   ├── .dockerignore           # Docker ignore rules
 │   └── .env.example            # Environment variables example
-├── api/
-│   ├── Makefile               # Build/run commands
-│   ├── app/
-│   │   ├── bin/
-│   │   │   └── app.psgi        # PSGI application
-│   │   └── public/
-│   │       └── index.html      # Interactive documentation
+├── app/
+│   ├── app.psgi               # PSGI application
+│   ├── lib/
+│   │   ├── FQCache.pm        # In-memory cache module
+│   │   ├── FQDB.pm           # SQLite database operations
+│   │   └── FQUtils.pm        # Utilities + OpenAPI generator
+│   └── public/
+│       └── index.html         # Interactive documentation
 └── libs/
     ├── README.md               # Client libraries overview
     ├── go/                      # Go client library
@@ -67,8 +68,18 @@ http://localhost:3001/api/v1
 | GET | `/api/v1/health` | Health check |
 | GET | `/api/v1/methods` | List available quote methods |
 | GET | `/api/v1/quote/:symbols` | Fetch stock quotes |
+| GET | `/api/v1/info/:symbol` | Get detailed symbol metadata |
 | GET | `/api/v1/currency/:from/:to` | Currency conversion |
 | GET | `/api/v1/fetch/:method/:symbols` | Fetch using specific method |
+| GET | `/api/v1/db/stats` | Database statistics |
+| GET | `/api/v1/db/assets` | List asset types |
+| GET | `/api/v1/db/options/:type` | Filter options for type |
+| GET | `/api/v1/search?q=...` | Search assets by name/symbol/ISIN |
+| GET | `/api/v1/lookup/:symbol` | Lookup exact symbol |
+| GET | `/api/v1/filter?type=...` | Filter assets by criteria |
+| GET/POST | `/mcp` | MCP JSON-RPC endpoint |
+| GET | `/mcp/sse` | MCP SSE endpoint |
+| GET | `/api/v1/spec` | Auto-generated OpenAPI spec |
 
 ### Query Parameters
 
