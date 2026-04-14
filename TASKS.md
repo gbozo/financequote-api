@@ -99,10 +99,17 @@ Comprehensive MCP protocol enrichment: composite tools, discovery tools, resourc
 - [x] **`initialize` advertises resources** - Response now includes `resources` capability alongside `tools`.
 - [x] **Unknown method error improved** - Lists all supported methods for quick recovery.
 
+### MCP Prompts (New)
+
+- [x] **`analyze_stock`** - Pre-built prompt for comprehensive stock analysis. Instructs the agent to use `analyze_symbol` and present structured output: company overview, current price, valuation, income, 52-week performance, and key takeaway.
+- [x] **`compare_investments`** - Side-by-side investment comparison prompt. Uses `compare_symbols` and presents comparison table, valuation analysis, size/sector comparison, and summary.
+- [x] **`market_screener`** - Market screening prompt. Uses `get_filter_options` + `filter_assets` + `get_portfolio` to find and price stocks matching sector/country/market cap criteria.
+- [x] **`currency_check`** - Quick forex lookup prompt. Uses `get_currency` and presents rate with 1/10/100/1000 conversion examples.
+
 ### Documentation Updates
 
-- [x] **README.md** - Updated MCP section with all 14 tools in categorized table, 3 resources, new curl examples (analyze_symbol, get_portfolio, convert_amount), Claude Desktop and OpenCode/Cursor config examples.
-- [x] **AGENTS.md** - Added MCP tool description guidelines, MCP resources section, MCP tool categories table with 4 categories (Composite, Quotes, Discovery, Database).
+- [x] **README.md** - Updated MCP section with all 13 tools in categorized table, 3 resources, 4 prompts, new curl examples, Claude Desktop and OpenCode/Cursor config examples.
+- [x] **AGENTS.md** - Added MCP tool description guidelines, MCP resources section, MCP prompts section, MCP tool categories table.
 - [x] **TASKS.md** - This section documenting all MCP enrichments.
 
 ### Files Changed

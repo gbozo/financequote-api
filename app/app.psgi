@@ -157,7 +157,7 @@ use Finance::Quote;
     });
     FQUtils::register_route('/mcp', 'post', {
         summary => 'MCP Endpoint',
-        description => 'Model Context Protocol JSON-RPC 2.0 endpoint. Supports: initialize, tools/list, tools/call, resources/list, resources/read, notifications/initialized. 13 tools available including composite analysis and portfolio tools.',
+        description => 'Model Context Protocol JSON-RPC 2.0 endpoint. Supports: initialize, tools/list, tools/call, resources/list, resources/read, prompts/list, prompts/get, notifications/initialized. 13 tools, 3 resources, 4 prompts available.',
         responses => { '200' => { description => 'JSON-RPC response' } },
     });
     FQUtils::register_route('/mcp', 'get', {
@@ -444,6 +444,7 @@ use Finance::Quote;
                 capabilities    => {
                     tools     => {},
                     resources => {},
+                    prompts   => {},
                 },
                 serverInfo      => {
                     name    => 'FinanceQuote',
@@ -479,8 +480,18 @@ use Finance::Quote;
             return _handle_mcp_resource_read($id, $params);
         }
 
+        # --- prompts/list ---
+        if ($method eq 'prompts/list') {
+            return jsonrpc_response($id, { prompts => _mcp_prompt_definitions() });
+        }
+
+        # --- prompts/get ---
+        if ($method eq 'prompts/get') {
+            return _handle_mcp_prompt_get($id, $params);
+        }
+
         return jsonrpc_error($id, -32601, "Method not found",
-            "Unknown method: $method. Supported: initialize, tools/list, tools/call, resources/list, resources/read");
+            "Unknown method: $method. Supported: initialize, tools/list, tools/call, resources/list, resources/read, prompts/list, prompts/get");
     }
 
     sub _handle_mcp_tool_call {
@@ -1016,6 +1027,129 @@ use Finance::Quote;
 
         return jsonrpc_error($id, -32002, "Resource not found",
             "Unknown resource URI: $uri. Use resources/list to see available resources.");
+    }
+
+    # ============================================
+    # MCP Prompts
+    # ============================================
+
+    sub _mcp_prompt_definitions {
+        return [
+            {
+                name        => 'analyze_stock',
+                description => 'Comprehensive stock analysis: fetches live price, detailed fundamentals (PE, yield, market cap), and database metadata (sector, country, exchange). Provides a structured summary with key metrics.',
+                arguments   => [
+                    { name => 'symbol', description => 'Ticker symbol or company name (e.g., AAPL, "Microsoft")', required => JSON::XS::true },
+                ],
+            },
+            {
+                name        => 'compare_investments',
+                description => 'Side-by-side investment comparison of 2 or more stocks. Compares price, valuation (PE), yield, market cap, and sector. Helps evaluate which investment may be more attractive.',
+                arguments   => [
+                    { name => 'symbols', description => 'Comma-separated ticker symbols to compare (e.g., AAPL,MSFT,GOOGL)', required => JSON::XS::true },
+                ],
+            },
+            {
+                name        => 'market_screener',
+                description => 'Screen stocks by sector, country, exchange, or market cap. Finds matching assets in the database and optionally fetches live quotes for the top results.',
+                arguments   => [
+                    { name => 'sector',     description => 'Sector to screen (e.g., Technology, Healthcare). Use get_filter_options to discover valid values.', required => JSON::XS::false },
+                    { name => 'country',    description => 'Country filter (e.g., United States, Germany)',    required => JSON::XS::false },
+                    { name => 'market_cap', description => 'Market cap tier (e.g., Large Cap, Mega Cap)',      required => JSON::XS::false },
+                ],
+            },
+            {
+                name        => 'currency_check',
+                description => 'Quick currency exchange rate lookup between two currencies. Provides the current rate and context about the currency pair.',
+                arguments   => [
+                    { name => 'from', description => 'Source currency code (e.g., USD, GBP)', required => JSON::XS::true },
+                    { name => 'to',   description => 'Target currency code (e.g., EUR, JPY)', required => JSON::XS::true },
+                ],
+            },
+        ];
+    }
+
+    sub _handle_mcp_prompt_get {
+        my ($id, $params) = @_;
+        my $name = $params->{name} // '';
+        my $args = $params->{arguments} // {};
+
+        if ($name eq 'analyze_stock') {
+            my $symbol = $args->{symbol} // 'AAPL';
+            return jsonrpc_response($id, {
+                description => "Comprehensive analysis of $symbol",
+                messages => [
+                    {
+                        role    => 'user',
+                        content => {
+                            type => 'text',
+                            text => "Analyze the stock $symbol. Use the analyze_symbol tool to get comprehensive data including database metadata, live quote, and detailed fundamentals. Then provide a structured summary covering:\n\n1. **Company Overview** - Name, sector, industry, country, exchange\n2. **Current Price** - Last price, day change (%), day range\n3. **Valuation** - P/E ratio, EPS, market cap\n4. **Income** - Dividend yield, dividend amount\n5. **52-Week Performance** - Year high, year low, current position in range\n6. **Key Takeaway** - Brief assessment based on the data\n\nAll prices are in the server's configured default currency unless I specify otherwise.",
+                        },
+                    },
+                ],
+            });
+        }
+
+        if ($name eq 'compare_investments') {
+            my $symbols = $args->{symbols} // 'AAPL,MSFT';
+            return jsonrpc_response($id, {
+                description => "Investment comparison: $symbols",
+                messages => [
+                    {
+                        role    => 'user',
+                        content => {
+                            type => 'text',
+                            text => "Compare these stocks side by side: $symbols. Use the compare_symbols tool to get price, PE ratio, dividend yield, market cap, sector, and volume for each. Then present:\n\n1. **Comparison Table** - Key metrics side by side\n2. **Valuation** - Which looks cheaper by PE? Which has better yield?\n3. **Size & Sector** - Market cap comparison, same/different sectors\n4. **Summary** - Brief comparison highlighting key differences\n\nAll prices are in the server's configured default currency.",
+                        },
+                    },
+                ],
+            });
+        }
+
+        if ($name eq 'market_screener') {
+            my $sector = $args->{sector} // '';
+            my $country = $args->{country} // '';
+            my $market_cap = $args->{market_cap} // '';
+
+            my @criteria;
+            push @criteria, "sector: $sector" if $sector;
+            push @criteria, "country: $country" if $country;
+            push @criteria, "market cap: $market_cap" if $market_cap;
+            my $criteria_text = @criteria ? join(', ', @criteria) : 'Technology sector, Large Cap, United States';
+
+            return jsonrpc_response($id, {
+                description => "Market screening: $criteria_text",
+                messages => [
+                    {
+                        role    => 'user',
+                        content => {
+                            type => 'text',
+                            text => "Screen the market for stocks matching: $criteria_text.\n\nSteps:\n1. If no criteria provided, first use get_filter_options for equities to show me available sectors, countries, and market cap tiers, then ask what I'd like to screen for.\n2. Use filter_assets with the criteria to find matching stocks (limit to 10).\n3. For the top 5 results, use get_portfolio to fetch live quotes.\n4. Present a summary table with: symbol, name, sector, price, and market cap.\n\nAll prices are in the server's configured default currency.",
+                        },
+                    },
+                ],
+            });
+        }
+
+        if ($name eq 'currency_check') {
+            my $from = $args->{from} // 'USD';
+            my $to = $args->{to} // 'EUR';
+            return jsonrpc_response($id, {
+                description => "Exchange rate: $from to $to",
+                messages => [
+                    {
+                        role    => 'user',
+                        content => {
+                            type => 'text',
+                            text => "Get the current exchange rate from $from to $to using the get_currency tool. Present the rate clearly, and show what 1, 10, 100, and 1000 $from would be in $to.",
+                        },
+                    },
+                ],
+            });
+        }
+
+        return jsonrpc_error($id, -32002, "Prompt not found",
+            "Unknown prompt: $name. Use prompts/list to see available prompts.");
     }
 }
 

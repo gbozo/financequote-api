@@ -223,6 +223,21 @@ Resources provide static/semi-static data that agents can read without tool call
 | **Discovery** | `list_methods`, `get_asset_types`, `get_filter_options` | Help agents understand available data |
 | **Database** | `search_assets`, `lookup_symbol`, `filter_assets`, `get_db_stats` | FinanceDatabase queries |
 
+### MCP Prompts
+
+Prompts provide pre-built conversation templates that guide agents through common workflows:
+
+```perl
+# Prompts are defined in _mcp_prompt_definitions() and handled in _handle_mcp_prompt_get()
+# Current prompts:
+#   analyze_stock        - Comprehensive stock analysis with structured output
+#   compare_investments  - Side-by-side investment comparison
+#   market_screener      - Screen stocks by sector/country/market cap
+#   currency_check       - Quick forex rate lookup with conversion examples
+```
+
+Each prompt returns a `messages` array with a pre-crafted user message that instructs the LLM which tools to call and how to format the output. The prompts reference the server's default currency (FQ_CURRENCY) so agents know conversion is automatic.
+
 ### Shared Logic Between REST and MCP
 
 Core data-fetching functions are shared to avoid duplication:

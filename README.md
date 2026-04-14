@@ -258,7 +258,7 @@ Visit **http://localhost:3001** in your browser for:
 
 ### MCP Protocol (for AI Agents)
 
-The MCP endpoint (`POST /mcp`) allows AI agents and LLMs to access financial data via JSON-RPC 2.0. With 13 tools and 3 resources, agents can do everything from single quotes to full portfolio analysis in one call.
+The MCP endpoint (`POST /mcp`) allows AI agents and LLMs to access financial data via JSON-RPC 2.0. With 13 tools, 3 resources, and 4 prompts, agents can do everything from single quotes to full portfolio analysis in one call.
 
 ```bash
 # Initialize connection
@@ -329,6 +329,15 @@ curl -X POST http://localhost:3001/mcp \
 | `financequote://methods` | All available quote methods |
 | `financequote://asset-types` | Asset types with descriptions and counts |
 | `financequote://server-info` | Server version, cache status, capabilities |
+
+**Available MCP Prompts (4):**
+
+| Prompt | Description |
+|--------|-------------|
+| `analyze_stock` | Comprehensive stock analysis with structured output |
+| `compare_investments` | Side-by-side comparison of 2+ investment options |
+| `market_screener` | Screen stocks by sector, country, or market cap |
+| `currency_check` | Quick forex rate lookup with conversion examples |
 
 ### Query Parameters
 
