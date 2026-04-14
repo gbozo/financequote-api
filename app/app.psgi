@@ -793,33 +793,33 @@ use Finance::Quote;
             # --- Composite tools (recommended for most use cases) ---
             {
                 name => 'analyze_symbol',
-                description => 'All-in-one symbol analysis. Given a company name or ticker symbol, returns database metadata (sector, country, exchange, ISIN), live quote (price, change, volume), and detailed info (PE, yield, market cap) in a single call. START HERE if you need comprehensive data about a stock. Example: symbol="AAPL" or symbol="Apple". Returns: { database: {...}, quote: {...}, info: {...} }',
+                description => 'All-in-one symbol analysis. Given a company name or ticker symbol, returns database metadata (sector, country, exchange, ISIN), live quote (price, change, volume), and detailed info (PE, yield, market cap) in a single call. START HERE if you need comprehensive data about a stock. Prices are returned in the server default currency (FQ_CURRENCY) unless overridden. Example: symbol="AAPL" or symbol="Apple". Returns: { database: {...}, quote: {...}, info: {...} }',
                 inputSchema => {
                     type => 'object',
                     properties => {
                         symbol   => { type => 'string', description => 'Ticker symbol (e.g., AAPL) or company name (e.g., Apple). Names are auto-resolved to tickers.' },
                         method   => { type => 'string', description => 'Data source (default: yahooJSON). Use list_methods to see all available sources.' },
-                        currency => { type => 'string', description => 'Convert prices to this currency (ISO 4217, e.g., EUR, GBP). Omit for native currency.' },
+                        currency => { type => 'string', description => 'Convert prices to this currency (ISO 4217, e.g., EUR, GBP). Optional: server default currency (FQ_CURRENCY) is used automatically.' },
                     },
                     required => ['symbol'],
                 },
             },
             {
                 name => 'get_portfolio',
-                description => 'Fetch live quotes for multiple symbols in one call. Ideal for portfolio tracking, watchlists, or batch price checks. Returns per-symbol quote data including last price, change, volume, and day range. Example: symbols="AAPL,MSFT,GOOGL,AMZN". Returns: { portfolio: { AAPL: {...}, MSFT: {...} }, count: N }',
+                description => 'Fetch live quotes for multiple symbols in one call. Ideal for portfolio tracking, watchlists, or batch price checks. Returns per-symbol quote data including last price, change, volume, and day range. Prices are returned in the server default currency (FQ_CURRENCY) unless overridden. Example: symbols="AAPL,MSFT,GOOGL,AMZN". Returns: { portfolio: { AAPL: {...}, MSFT: {...} }, count: N }',
                 inputSchema => {
                     type => 'object',
                     properties => {
                         symbols  => { type => 'string', description => 'Comma-separated ticker symbols (e.g., AAPL,MSFT,GOOGL,AMZN,TSLA)' },
                         method   => { type => 'string', description => 'Data source (default: yahooJSON)' },
-                        currency => { type => 'string', description => 'Convert all prices to this currency (ISO 4217). Omit for native currencies.' },
+                        currency => { type => 'string', description => 'Convert all prices to this currency (ISO 4217). Optional: server default currency (FQ_CURRENCY) is used automatically.' },
                     },
                     required => ['symbols'],
                 },
             },
             {
                 name => 'compare_symbols',
-                description => 'Side-by-side comparison of 2 or more stocks. Returns price, PE ratio, dividend yield, market cap, sector, country, and volume for each symbol. Use this when comparing investment options. Example: symbols="AAPL,MSFT,GOOGL". Returns: { comparison: [{symbol, close, pe, yield, cap, ...}, ...] }',
+                description => 'Side-by-side comparison of 2 or more stocks. Returns price, PE ratio, dividend yield, market cap, sector, country, and volume for each symbol. Prices are in the server default currency (FQ_CURRENCY). Use this when comparing investment options. Example: symbols="AAPL,MSFT,GOOGL". Returns: { comparison: [{symbol, close, pe, yield, cap, ...}, ...] }',
                 inputSchema => {
                     type => 'object',
                     properties => {
@@ -832,20 +832,20 @@ use Finance::Quote;
             # --- Core data tools ---
             {
                 name => 'get_quote',
-                description => 'Fetch raw live quotes for one or more symbols. Returns per-symbol hash with fields: last, close, open, high, low, volume, change, p_change, currency, date, time, name, exchange, method, success. Use get_portfolio for multiple symbols or analyze_symbol for comprehensive data. Example: symbols="AAPL,MSFT"',
+                description => 'Fetch raw live quotes for one or more symbols. Returns per-symbol hash with fields: last, close, open, high, low, volume, change, p_change, currency, date, time, name, exchange, method, success. Prices are returned in the server default currency (FQ_CURRENCY) unless overridden. Use get_portfolio for multiple symbols or analyze_symbol for comprehensive data. Example: symbols="AAPL,MSFT"',
                 inputSchema => {
                     type => 'object',
                     properties => {
                         symbols  => { type => 'string', description => 'Comma-separated ticker symbols (e.g., AAPL or AAPL,MSFT,GOOGL)' },
                         method   => { type => 'string', description => 'Data source. Common: yahooJSON (default, best coverage), AlphaVantage (needs API key). Use list_methods for all.' },
-                        currency => { type => 'string', description => 'Convert prices to this currency (ISO 4217, e.g., EUR). Omit for native currency.' },
+                        currency => { type => 'string', description => 'Convert prices to this currency (ISO 4217, e.g., EUR). Optional: server default currency (FQ_CURRENCY) is used automatically.' },
                     },
                     required => ['symbols'],
                 },
             },
             {
                 name => 'get_symbol_info',
-                description => 'Get detailed metadata for a single stock symbol. Returns: symbol, name, exchange, currency, close, open, high, low, volume, pe, eps, div, yield, cap, year_high, year_low, day_range, year_range, pct_change. Use analyze_symbol instead if you also need database metadata.',
+                description => 'Get detailed metadata for a single stock symbol. Prices are in the server default currency (FQ_CURRENCY). Returns: symbol, name, exchange, currency, close, open, high, low, volume, pe, eps, div, yield, cap, year_high, year_low, day_range, year_range, pct_change. Use analyze_symbol instead if you also need database metadata.',
                 inputSchema => {
                     type => 'object',
                     properties => {
@@ -857,7 +857,7 @@ use Finance::Quote;
             },
             {
                 name => 'get_currency',
-                description => 'Get the exchange rate between two currencies. Returns: { from, to, rate }. To convert an amount, multiply by the rate. Example: from=USD, to=EUR returns { rate: 0.92 }. Note: get_quote with currency parameter returns quotes already converted.',
+                description => 'Get the exchange rate between two currencies. Returns: { from, to, rate }. To convert an amount, multiply by the rate. Example: from=USD, to=EUR returns { rate: 0.92 }. Note: quote tools already return prices in the server default currency (FQ_CURRENCY), so explicit conversion is rarely needed.',
                 inputSchema => {
                     type => 'object',
                     properties => {
