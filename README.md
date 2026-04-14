@@ -107,20 +107,39 @@ URL: http://localhost:3001/mcp/sse
 
 ---
 
-### Other MCP Clients
+### Claude Desktop
 
-For any other MCP-compatible client (Claude Desktop, Cursor, etc.):
+Add to your `claude_desktop_config.json`:
 
-#### SSE Transport (Recommended)
+```json
+{
+  "mcpServers": {
+    "financequote": {
+      "type": "http",
+      "url": "http://localhost:3001/mcp"
+    }
+  }
+}
+```
 
+### OpenCode / Cursor / Other MCP Clients
+
+Most MCP-compatible clients support HTTP transport. Add to your MCP config:
+
+```json
+{
+  "mcpServers": {
+    "financequote": {
+      "type": "http",
+      "url": "http://localhost:3001/mcp"
+    }
+  }
+}
+```
+
+For SSE-based clients, use the SSE endpoint:
 ```
 URL: http://localhost:3001/mcp/sse
-```
-
-#### HTTP Transport (Fallback)
-
-```
-URL: http://localhost:3001/mcp
 ```
 
 #### Environment Variables for MCP
@@ -129,8 +148,15 @@ If using authentication, set the appropriate headers:
 
 | Variable | Description |
 |----------|-------------|
-| `API_AUTH_KEYS` | Enable Bearer token auth |
-| `MCP_AUTH_TOKEN` | Token to pass via Authorization header |
+| `API_AUTH_KEYS` | Enable Bearer token auth (comma-separated keys) |
+
+```bash
+# Authenticated MCP request
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+```
 
 ## ⚡ Quick Install (Copy & Deploy)
 
@@ -232,7 +258,7 @@ Visit **http://localhost:3001** in your browser for:
 
 ### MCP Protocol (for AI Agents)
 
-The MCP endpoint (`POST /mcp`) allows AI agents and LLMs to access quote data via JSON-RPC 2.0:
+The MCP endpoint (`POST /mcp`) allows AI agents and LLMs to access financial data via JSON-RPC 2.0. With 14 tools and 3 resources, agents can do everything from single quotes to full portfolio analysis in one call.
 
 ```bash
 # Initialize connection
@@ -245,7 +271,7 @@ curl -X POST http://localhost:3001/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 
-# Get a stock quote
+# Analyze a symbol (all-in-one: resolves name, fetches quote + info + DB data)
 curl -X POST http://localhost:3001/mcp \
   -H "Content-Type: application/json" \
   -d '{
@@ -253,12 +279,12 @@ curl -X POST http://localhost:3001/mcp \
     "id":3,
     "method":"tools/call",
     "params":{
-      "name":"get_quote",
-      "arguments":{"symbols":"AAPL,MSFT"}
+      "name":"analyze_symbol",
+      "arguments":{"query":"AAPL"}
     }
   }'
 
-# Get currency rate
+# Get portfolio quotes (batch multiple symbols in one call)
 curl -X POST http://localhost:3001/mcp \
   -H "Content-Type: application/json" \
   -d '{
@@ -266,16 +292,56 @@ curl -X POST http://localhost:3001/mcp \
     "id":4,
     "method":"tools/call",
     "params":{
-      "name":"get_currency",
-      "arguments":{"from":"USD","to":"EUR"}
+      "name":"get_portfolio",
+      "arguments":{"symbols":"AAPL,MSFT,GOOGL,AMZN"}
     }
   }'
+
+# Convert an amount between currencies
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":5,
+    "method":"tools/call",
+    "params":{
+      "name":"convert_amount",
+      "arguments":{"from":"USD","to":"EUR","amount":1000}
+    }
+  }'
+
+# List available resources
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":6,"method":"resources/list"}'
 ```
 
-**Available MCP Tools:**
-- `get_quote` — Fetch stock/ETF quotes (params: symbols, method, currency)
-- `get_currency` — Exchange rate conversion (params: from, to)
-- `list_methods` — Show all available quote methods
+**Available MCP Tools (14):**
+
+| Category | Tool | Description |
+|----------|------|-------------|
+| **Composite** | `analyze_symbol` | All-in-one: resolves name/ticker, fetches live quote + info + DB data |
+| **Composite** | `get_portfolio` | Batch quotes for multiple symbols in one call |
+| **Composite** | `compare_symbols` | Side-by-side comparison of 2+ symbols |
+| **Composite** | `convert_amount` | Currency conversion with amount calculation |
+| **Quotes** | `get_quote` | Fetch stock/ETF quotes by ticker |
+| **Quotes** | `get_symbol_info` | Detailed symbol information |
+| **Quotes** | `get_currency` | Exchange rate between two currencies |
+| **Discovery** | `list_methods` | Available quote data sources |
+| **Discovery** | `get_asset_types` | Available asset types with row counts |
+| **Discovery** | `get_filter_options` | Valid filter values per asset type |
+| **Database** | `search_assets` | Full-text search across asset database |
+| **Database** | `lookup_symbol` | Look up a specific ticker symbol |
+| **Database** | `filter_assets` | Filter assets by sector, country, exchange, etc. |
+| **Database** | `get_db_stats` | Database statistics and row counts |
+
+**Available MCP Resources (3):**
+
+| URI | Description |
+|-----|-------------|
+| `financequote://methods` | All available quote methods |
+| `financequote://asset-types` | Asset types with descriptions and counts |
+| `financequote://server-info` | Server version, cache status, capabilities |
 
 ### Query Parameters
 

@@ -68,6 +68,54 @@ Comprehensive code review with 22 improvements across security, bugs, architectu
 
 ---
 
+## v1.71 - MCP Enrichment
+
+Comprehensive MCP protocol enrichment: composite tools, discovery tools, resources, enriched descriptions, and protocol improvements. Grew from 8 tools to 14 tools + 3 resources.
+
+### Composite Tools (New)
+
+- [x] **`analyze_symbol`** - All-in-one tool: auto-resolves name/ticker via DB lookup/search, fetches live quote + detailed info in a single call. Eliminates multi-step lookup-then-quote workflows.
+- [x] **`get_portfolio`** - Batch quotes for multiple symbols in one call. Returns per-symbol results with method and currency info. Replaces repeated get_quote calls.
+- [x] **`compare_symbols`** - Side-by-side comparison of 2+ symbols: price, PE, yield, market cap, sector. Enriches with DB data (sector, industry, country) when available.
+- [x] **`convert_amount`** - Full currency conversion: rate + original_amount + converted_amount + display string. Extends get_currency with practical calculation.
+
+### Discovery Tools (New)
+
+- [x] **`get_filter_options`** - Exposes valid filter values per asset type (sectors, countries, exchanges, market_caps). Agents can discover what values to pass to filter_assets.
+- [x] **`get_asset_types`** - Lists available asset types with descriptions and row counts from the database. Helps agents understand what data is available.
+
+### Description Enrichment
+
+- [x] **All 14 tool descriptions enriched** - Every tool now includes: example inputs, output field names, guidance on when to use which tool, cross-references to related tools (e.g., filter_assets says "Use get_filter_options first").
+- [x] **Error messages include actionable hints** - Required field errors now show examples of valid values.
+
+### Protocol Improvements
+
+- [x] **`notifications/initialized` handled** - Returns empty 200 instead of JSON-RPC error. Required by MCP spec.
+- [x] **Resources capability** - `resources/list` and `resources/read` with 3 resources:
+  - `financequote://methods` - all available quote methods
+  - `financequote://asset-types` - asset types with descriptions and row counts
+  - `financequote://server-info` - version, cache status, capabilities
+- [x] **`initialize` advertises resources** - Response now includes `resources` capability alongside `tools`.
+- [x] **Unknown method error improved** - Lists all supported methods for quick recovery.
+
+### Documentation Updates
+
+- [x] **README.md** - Updated MCP section with all 14 tools in categorized table, 3 resources, new curl examples (analyze_symbol, get_portfolio, convert_amount), Claude Desktop and OpenCode/Cursor config examples.
+- [x] **AGENTS.md** - Added MCP tool description guidelines, MCP resources section, MCP tool categories table with 4 categories (Composite, Quotes, Discovery, Database).
+- [x] **TASKS.md** - This section documenting all MCP enrichments.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `app/app.psgi` | 6 new tools, 3 resources, enriched descriptions, notifications/initialized, resources/list+read |
+| `AGENTS.md` | MCP tool guidelines, resources section, tool categories table |
+| `TASKS.md` | v1.71 section with all MCP enrichment details |
+| `README.md` | Updated MCP tools table (14), resources table (3), new curl examples, multi-client configs |
+
+---
+
 ## Previous Tasks (v1.0 - v1.69)
 
 ### Core Infrastructure

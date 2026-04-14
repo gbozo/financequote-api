@@ -178,11 +178,11 @@ if ($path =~ m{^/api/v1/newfeature/([^/]+)$}) {
 # 1. Add tool definition in _mcp_tool_definitions() (app.psgi)
 {
     name => 'my_tool',
-    description => 'What it does',
+    description => 'What it does. Returns: field1, field2. Example: my_tool({param1: "value"})',
     inputSchema => {
         type => 'object',
         properties => {
-            param1 => { type => 'string', description => '...' },
+            param1 => { type => 'string', description => 'What this param does. Example: "value"' },
         },
         required => ['param1'],
     },
@@ -195,6 +195,33 @@ if ($tool_name eq 'my_tool') {
     return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($result) }] });
 }
 ```
+
+**MCP Tool Description Guidelines:**
+- Always include example inputs in the description
+- List the output fields the tool returns
+- Cross-reference related tools (e.g., "Use get_filter_options first to discover valid values")
+- For errors, include actionable hints with examples
+
+### MCP Resources
+
+Resources provide static/semi-static data that agents can read without tool calls:
+
+```perl
+# Resources are defined in _mcp_resource_definitions() and handled in handle_mcp()
+# Current resources:
+#   financequote://methods     - all available quote methods
+#   financequote://asset-types - asset types with descriptions and row counts
+#   financequote://server-info - version, cache status, capabilities
+```
+
+### MCP Tool Categories
+
+| Category | Tools | Purpose |
+|----------|-------|---------|
+| **Composite** | `analyze_symbol`, `get_portfolio`, `compare_symbols`, `convert_amount` | Multi-step workflows in one call |
+| **Quotes** | `get_quote`, `get_symbol_info`, `get_currency` | Direct Finance::Quote access |
+| **Discovery** | `list_methods`, `get_asset_types`, `get_filter_options` | Help agents understand available data |
+| **Database** | `search_assets`, `lookup_symbol`, `filter_assets`, `get_db_stats` | FinanceDatabase queries |
 
 ### Shared Logic Between REST and MCP
 
