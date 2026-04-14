@@ -72,22 +72,24 @@ use Finance::Quote;
     });
     FQUtils::register_route('/api/v1/quote/{symbols}', 'get', {
         summary => 'Fetch Quotes',
-        description => 'Fetch stock quotes for given symbols',
+        description => 'Fetch stock quotes for given symbols. By default includes company_info from FinanceDatabase (sector, industry, country, website, summary, ISIN, etc.) for each symbol.',
         params => [
             { name => 'symbols', in => 'path', required => 1, type => 'string', description => 'Comma-separated symbols' },
             { name => 'method', in => 'query', type => 'string', description => 'Quote method (default: yahooJSON)' },
             { name => 'currency', in => 'query', type => 'string', description => 'Desired currency (e.g., EUR)' },
+            { name => 'enrich', in => 'query', type => 'boolean', description => 'Include company_info from FinanceDatabase (default: true). Set to 0 to disable.' },
         ],
-        responses => { '200' => { description => 'Quote data' } },
+        responses => { '200' => { description => 'Quote data with optional company_info' } },
     });
     FQUtils::register_route('/api/v1/info/{symbol}', 'get', {
         summary => 'Get Symbol Info',
-        description => 'Get detailed metadata about a stock symbol',
+        description => 'Get detailed metadata about a stock symbol. By default includes company_info from FinanceDatabase (sector, industry, country, website, summary, ISIN, etc.).',
         params => [
             { name => 'symbol', in => 'path', required => 1, type => 'string', description => 'Stock symbol' },
             { name => 'method', in => 'query', type => 'string', description => 'Quote method' },
+            { name => 'enrich', in => 'query', type => 'boolean', description => 'Include company_info from FinanceDatabase (default: true). Set to 0 to disable.' },
         ],
-        responses => { '200' => { description => 'Symbol metadata' } },
+        responses => { '200' => { description => 'Symbol metadata with optional company_info' } },
     });
     FQUtils::register_route('/api/v1/currency/{from}/{to}', 'get', {
         summary => 'Currency Conversion',
@@ -100,12 +102,13 @@ use Finance::Quote;
     });
     FQUtils::register_route('/api/v1/fetch/{method}/{symbols}', 'get', {
         summary => 'Direct Fetch',
-        description => 'Fetch quotes using a specific method',
+        description => 'Fetch quotes using a specific method. By default includes company_info from FinanceDatabase.',
         params => [
             { name => 'method', in => 'path', required => 1, type => 'string', description => 'FQ method name' },
             { name => 'symbols', in => 'path', required => 1, type => 'string', description => 'Symbols' },
+            { name => 'enrich', in => 'query', type => 'boolean', description => 'Include company_info from FinanceDatabase (default: true). Set to 0 to disable.' },
         ],
-        responses => { '200' => { description => 'Quote data' } },
+        responses => { '200' => { description => 'Quote data with optional company_info' } },
     });
     FQUtils::register_route('/api/v1/db/stats', 'get', {
         summary => 'Database Statistics',
@@ -271,11 +274,61 @@ use Finance::Quote;
         return json_response('success', { methods => \@methods });
     }
 
+    # ============================================
+    # DB Enrichment Helper
+    # ============================================
+
+    # Enrich a single symbol's data with FinanceDatabase info.
+    # Adds a 'company_info' nested object with sector, industry, country,
+    # website, summary, etc. from the FinanceDatabase SQLite DB.
+    # Returns the DB info hashref (or undef if not found).
+    sub _enrich_symbol {
+        my ($symbol) = @_;
+        return undef unless $symbol;
+        my $db_info = eval { FQDB::lookup_symbol($symbol) };
+        return undef unless $db_info && ref $db_info eq 'HASH';
+
+        # Remove fields that duplicate live quote data or are redundant
+        my %skip = map { $_ => 1 } qw(symbol);
+        my %company_info;
+        for my $key (keys %$db_info) {
+            next if $skip{$key};
+            next unless defined $db_info->{$key} && $db_info->{$key} ne '';
+            $company_info{$key} = $db_info->{$key};
+        }
+
+        return keys %company_info ? \%company_info : undef;
+    }
+
+    # Enrich a quote result hash (keyed by symbol) with company_info from DB
+    sub _enrich_quotes_result {
+        my ($result) = @_;
+        return unless $result && ref $result eq 'HASH';
+
+        for my $sym (keys %$result) {
+            next unless ref $result->{$sym} eq 'HASH';
+            my $info = _enrich_symbol($sym);
+            $result->{$sym}{company_info} = $info if $info;
+        }
+    }
+
+    # Enrich a single info hash with company_info from DB
+    sub _enrich_info_result {
+        my ($info) = @_;
+        return unless $info && ref $info eq 'HASH';
+        my $sym = $info->{symbol};
+        return unless $sym;
+
+        my $db_info = _enrich_symbol($sym);
+        $info->{company_info} = $db_info if $db_info;
+    }
+
     # 3. Fetch Quotes - core logic shared by REST and MCP
     sub _fetch_quotes_data {
-        my ($symbols_str, $method, $currency) = @_;
+        my ($symbols_str, $method, $currency, $enrich) = @_;
         $method = _normalize_method($method || 'YahooJSON');
         $currency //= '';
+        $enrich //= 1;  # Enrichment on by default
 
         my @syms = split(/,/, $symbols_str);
         $quoter->{currency} = $currency if $currency;
@@ -284,6 +337,9 @@ use Finance::Quote;
 
         # Record to quotes_history (per-symbol per-day)
         eval { FQDB::record_quotes($result, $method) };
+
+        # Enrich with FinanceDatabase company info
+        _enrich_quotes_result($result) if $enrich;
 
         return $result;
     }
@@ -294,12 +350,13 @@ use Finance::Quote;
         my $method = $params->{method} || 'YahooJSON';
         $method = _normalize_method($method);
         my $currency = $params->{currency} || '';
-        my $cache_key = build_cache_key('quote', $symbols, $method, $currency);
+        my $enrich = (!defined $params->{enrich} || $params->{enrich}) ? 1 : 0;
+        my $cache_key = build_cache_key('quote', $symbols, $method, $currency, $enrich ? 'e' : '');
 
         my $cached = FQCache::get($cache_key);
         return $cached if $cached;
 
-        my $result = _fetch_quotes_data($symbols, $method, $currency);
+        my $result = _fetch_quotes_data($symbols, $method, $currency, $enrich);
         my $response = json_response('success', $result);
         FQCache::set($cache_key, $response);
         return $response;
@@ -307,8 +364,9 @@ use Finance::Quote;
 
     # 3b. Symbol Info - core logic shared by REST and MCP
     sub _fetch_info_data {
-        my ($symbol, $method) = @_;
+        my ($symbol, $method, $enrich) = @_;
         $method = _normalize_method($method || 'YahooJSON');
+        $enrich //= 1;  # Enrichment on by default
 
         my %quotes = $quoter->fetch($method, $symbol);
         my $sep = $;;
@@ -342,6 +400,9 @@ use Finance::Quote;
             eval { FQDB::record_quote($symbol, $info, $method) };
         }
 
+        # Enrich with FinanceDatabase company info
+        _enrich_info_result($info) if $enrich;
+
         return $info;
     }
 
@@ -350,12 +411,13 @@ use Finance::Quote;
 
         my $method = $params->{method} || 'YahooJSON';
         $method = _normalize_method($method);
-        my $cache_key = build_cache_key('info', $symbol, $method);
+        my $enrich = (!defined $params->{enrich} || $params->{enrich}) ? 1 : 0;
+        my $cache_key = build_cache_key('info', $symbol, $method, $enrich ? 'e' : '');
 
         my $cached = FQCache::get($cache_key);
         return $cached if $cached;
 
-        my $info = _fetch_info_data($symbol, $method);
+        my $info = _fetch_info_data($symbol, $method, $enrich);
         my $response = json_response('success', $info);
         FQCache::set($cache_key, $response);
         return $response;
@@ -457,11 +519,12 @@ use Finance::Quote;
                 "Use /api/v1/methods to see available methods");
         }
 
-        my $cache_key = build_cache_key('fetch', $method, $symbols);
+        my $enrich = (!defined $params->{enrich} || $params->{enrich}) ? 1 : 0;
+        my $cache_key = build_cache_key('fetch', $method, $symbols, $enrich ? 'e' : '');
         my $cached = FQCache::get($cache_key);
         return $cached if $cached;
 
-        my $result = _fetch_quotes_data($symbols, $method, '');
+        my $result = _fetch_quotes_data($symbols, $method, '', $enrich);
         my $response = json_response('success', $result);
         FQCache::set($cache_key, $response);
         return $response;
@@ -517,7 +580,7 @@ use Finance::Quote;
         my %valid_formats = map { $_ => 1 } qw(svg json html);
         $format = 'svg' unless $valid_formats{$format};
 
-        # Fetch live quote data
+        # Fetch live quote data (enrich=0: chart does its own DB lookup below)
         my $info = {};
         eval {
             my $cache_key = build_cache_key('info', $symbol, $method);
@@ -526,7 +589,7 @@ use Finance::Quote;
                 my $parsed = JSON::XS::decode_json($cached->[2][0]);
                 $info = $parsed->{data} // {};
             } else {
-                $info = _fetch_info_data($symbol, $method);
+                $info = _fetch_info_data($symbol, $method, 0);
                 my $response = json_response('success', $info);
                 FQCache::set($cache_key, $response);
             }

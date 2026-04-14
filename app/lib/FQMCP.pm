@@ -153,7 +153,7 @@ sub _handle_tool_call {
             }
         }
 
-        # Step 2: Live quote
+        # Step 2: Live quote (enrich=0: analyze_symbol provides DB data separately)
         eval {
             my $cache_key = _build_cache_key('quote', $query, $method, $currency);
             my $cached = FQCache::get($cache_key);
@@ -161,14 +161,14 @@ sub _handle_tool_call {
                 my $parsed = JSON::XS::decode_json($cached->[2][0]);
                 $analysis->{quote} = $parsed->{data};
             } else {
-                my $result = $fetch_quotes_fn->($query, $method, $currency);
+                my $result = $fetch_quotes_fn->($query, $method, $currency, 0);
                 my $response = _json_response('success', $result);
                 FQCache::set($cache_key, $response);
                 $analysis->{quote} = $result;
             }
         };
 
-        # Step 3: Detailed info
+        # Step 3: Detailed info (enrich=0: analyze_symbol provides DB data separately)
         eval {
             my $cache_key = _build_cache_key('info', $query, $method);
             my $cached = FQCache::get($cache_key);
@@ -176,7 +176,7 @@ sub _handle_tool_call {
                 my $parsed = JSON::XS::decode_json($cached->[2][0]);
                 $analysis->{info} = $parsed->{data};
             } else {
-                my $info = $fetch_info_fn->($query, $method);
+                my $info = $fetch_info_fn->($query, $method, 0);
                 my $response = _json_response('success', $info);
                 FQCache::set($cache_key, $response);
                 $analysis->{info} = $info;
@@ -191,6 +191,7 @@ sub _handle_tool_call {
         my $symbols_str = $tool_args->{symbols} // '';
         my $method      = $tool_args->{method} // 'yahooJSON';
         my $currency    = $tool_args->{currency} // '';
+        my $enrich      = ($tool_args->{enrich} // 1) ? 1 : 0;
 
         return _jsonrpc_error($id, -32602, "Invalid params",
             "symbols is required. Provide comma-separated symbols like AAPL,MSFT,GOOGL")
@@ -203,14 +204,14 @@ sub _handle_tool_call {
             $sym =~ s/^\s+|\s+$//g;
             next unless $sym;
 
-            my $cache_key = _build_cache_key('quote', $sym, $method, $currency);
+            my $cache_key = _build_cache_key('quote', $sym, $method, $currency, $enrich ? 'e' : '');
             my $cached = FQCache::get($cache_key);
             if ($cached) {
                 my $parsed = JSON::XS::decode_json($cached->[2][0]);
                 $portfolio{$sym} = $parsed->{data}{$sym} // $parsed->{data};
             } else {
                 eval {
-                    my $result = $fetch_quotes_fn->($sym, $method, $currency);
+                    my $result = $fetch_quotes_fn->($sym, $method, $currency, $enrich);
                     my $response = _json_response('success', $result);
                     FQCache::set($cache_key, $response);
                     $portfolio{$sym} = $result->{$sym} // $result;
@@ -257,13 +258,14 @@ sub _handle_tool_call {
                     my $parsed = JSON::XS::decode_json($cached->[2][0]);
                     $entry = { %$entry, %{$parsed->{data}} };
                 } else {
-                    my $info = $fetch_info_fn->($sym, $method);
+                    my $info = $fetch_info_fn->($sym, $method, 0);
                     my $response = _json_response('success', $info);
                     FQCache::set($cache_key, $response);
                     $entry = { %$entry, %$info };
                 }
             };
 
+            # Enrich with DB data (flat merge for comparison fields)
             eval {
                 my $db_info = FQDB::lookup_symbol($sym);
                 if ($db_info) {
@@ -290,12 +292,13 @@ sub _handle_tool_call {
         my $symbols  = $tool_args->{symbols} // '';
         my $method   = $tool_args->{method} // 'yahooJSON';
         my $currency = $tool_args->{currency} // '';
+        my $enrich   = ($tool_args->{enrich} // 1) ? 1 : 0;
 
         return _jsonrpc_error($id, -32602, "Invalid params",
             "symbols is required. Provide comma-separated ticker symbols like AAPL,MSFT")
             unless $symbols;
 
-        my $cache_key = _build_cache_key('quote', $symbols, $method, $currency);
+        my $cache_key = _build_cache_key('quote', $symbols, $method, $currency, $enrich ? 'e' : '');
         my $cached = FQCache::get($cache_key);
         if ($cached) {
             my $body   = $cached->[2][0];
@@ -303,7 +306,7 @@ sub _handle_tool_call {
             return _jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($parsed->{data}) }] });
         }
 
-        my $result   = $fetch_quotes_fn->($symbols, $method, $currency);
+        my $result   = $fetch_quotes_fn->($symbols, $method, $currency, $enrich);
         my $response = _json_response('success', $result);
         FQCache::set($cache_key, $response);
         return _jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($result) }] });
@@ -343,12 +346,13 @@ sub _handle_tool_call {
     if ($tool_name eq 'get_symbol_info') {
         my $symbol = $tool_args->{symbol} // '';
         my $method = $tool_args->{method} // 'yahooJSON';
+        my $enrich = ($tool_args->{enrich} // 1) ? 1 : 0;
 
         return _jsonrpc_error($id, -32602, "Invalid params",
             "symbol is required. Provide a ticker symbol like AAPL or MSFT")
             unless $symbol;
 
-        my $cache_key = _build_cache_key('info', $symbol, $method);
+        my $cache_key = _build_cache_key('info', $symbol, $method, $enrich ? 'e' : '');
         my $cached = FQCache::get($cache_key);
         if ($cached) {
             my $body   = $cached->[2][0];
@@ -356,7 +360,7 @@ sub _handle_tool_call {
             return _jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($parsed->{data}) }] });
         }
 
-        my $info     = $fetch_info_fn->($symbol, $method);
+        my $info     = $fetch_info_fn->($symbol, $method, $enrich);
         my $response = _json_response('success', $info);
         FQCache::set($cache_key, $response);
         return _jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($info) }] });
@@ -482,7 +486,7 @@ sub _handle_tool_call {
         my %valid_sizes = map { $_ => 1 } qw(small medium large);
         $size = 'medium' unless $valid_sizes{$size};
 
-        # Fetch info
+        # Fetch info (enrich=0: chart does its own DB lookup below)
         my $info = {};
         eval {
             my $cache_key = _build_cache_key('info', $symbol, $method);
@@ -491,7 +495,7 @@ sub _handle_tool_call {
                 my $parsed = JSON::XS::decode_json($cached->[2][0]);
                 $info = $parsed->{data} // {};
             } else {
-                $info = $fetch_info_fn->($symbol, $method);
+                $info = $fetch_info_fn->($symbol, $method, 0);
                 my $response = _json_response('success', $info);
                 FQCache::set($cache_key, $response);
             }
@@ -501,7 +505,7 @@ sub _handle_tool_call {
         my $history = FQDB::get_history(symbol => $symbol, limit => $days);
         $history = [ reverse @$history ] if $history && @$history;
 
-        # DB enrichment
+        # DB enrichment (chart-specific: passes db_info separately to FQChart)
         my $db_info = eval { FQDB::lookup_symbol($symbol) } // {};
 
         my $price      = $info->{close} // $info->{last};
@@ -577,13 +581,14 @@ sub _tool_definitions {
         },
         {
             name => 'get_portfolio',
-            description => 'Fetch live quotes for multiple symbols in one call. Ideal for portfolio tracking, watchlists, or batch price checks. Returns per-symbol quote data including last price, change, volume, and day range. Prices are returned in the server default currency (FQ_CURRENCY) unless overridden. Example: symbols="AAPL,MSFT,GOOGL,AMZN". Returns: { portfolio: { AAPL: {...}, MSFT: {...} }, count: N }',
+            description => 'Fetch live quotes for multiple symbols in one call. Ideal for portfolio tracking, watchlists, or batch price checks. Returns per-symbol quote data including last price, change, volume, and day range. By default includes company_info from FinanceDatabase (sector, industry, country, website, etc.) for each symbol. Prices are returned in the server default currency (FQ_CURRENCY) unless overridden. Example: symbols="AAPL,MSFT,GOOGL,AMZN". Returns: { portfolio: { AAPL: {..., company_info: {...}}, MSFT: {...} }, count: N }',
             inputSchema => {
                 type => 'object',
                 properties => {
                     symbols  => { type => 'string', description => 'Comma-separated ticker symbols (e.g., AAPL,MSFT,GOOGL,AMZN,TSLA)' },
                     method   => { type => 'string', description => 'Data source (default: yahooJSON)' },
                     currency => { type => 'string', description => 'Convert all prices to this currency (ISO 4217). Optional: server default currency (FQ_CURRENCY) is used automatically.' },
+                    enrich   => { type => 'boolean', description => 'Include company_info from FinanceDatabase for each symbol. Default: true. Set false for raw quote data only.' },
                 },
                 required => ['symbols'],
             },
@@ -603,25 +608,27 @@ sub _tool_definitions {
         # --- Core data tools ---
         {
             name => 'get_quote',
-            description => 'Fetch raw live quotes for one or more symbols. Returns per-symbol hash with fields: last, close, open, high, low, volume, change, p_change, currency, date, time, name, exchange, method, success. Prices are returned in the server default currency (FQ_CURRENCY) unless overridden. Use get_portfolio for multiple symbols or analyze_symbol for comprehensive data. Example: symbols="AAPL,MSFT"',
+            description => 'Fetch live quotes for one or more symbols. Returns per-symbol hash with fields: last, close, open, high, low, volume, change, p_change, currency, date, time, name, exchange, method, success. By default includes company_info from FinanceDatabase (sector, industry, country, website, summary, ISIN, etc.). Prices are returned in the server default currency (FQ_CURRENCY) unless overridden. Use get_portfolio for multiple symbols or analyze_symbol for comprehensive data. Example: symbols="AAPL,MSFT"',
             inputSchema => {
                 type => 'object',
                 properties => {
                     symbols  => { type => 'string', description => 'Comma-separated ticker symbols (e.g., AAPL or AAPL,MSFT,GOOGL)' },
                     method   => { type => 'string', description => 'Data source. Common: yahooJSON (default, best coverage), AlphaVantage (needs API key). Use list_methods for all.' },
                     currency => { type => 'string', description => 'Convert prices to this currency (ISO 4217, e.g., EUR). Optional: server default currency (FQ_CURRENCY) is used automatically.' },
+                    enrich   => { type => 'boolean', description => 'Include company_info from FinanceDatabase (sector, industry, country, website, summary, etc.). Default: true. Set false for raw quote data only.' },
                 },
                 required => ['symbols'],
             },
         },
         {
             name => 'get_symbol_info',
-            description => 'Get detailed metadata for a single stock symbol. Prices are in the server default currency (FQ_CURRENCY). Returns: symbol, name, exchange, currency, close, open, high, low, volume, pe, eps, div, yield, cap, year_high, year_low, day_range, year_range, pct_change. Use analyze_symbol instead if you also need database metadata.',
+            description => 'Get detailed metadata for a single stock symbol. Prices are in the server default currency (FQ_CURRENCY). Returns: symbol, name, exchange, currency, close, open, high, low, volume, pe, eps, div, yield, cap, year_high, year_low, day_range, year_range, pct_change. By default includes company_info from FinanceDatabase (sector, industry, country, website, summary, ISIN, etc.).',
             inputSchema => {
                 type => 'object',
                 properties => {
                     symbol => { type => 'string', description => 'Single ticker symbol (e.g., AAPL, MSFT, 0700.HK)' },
                     method => { type => 'string', description => 'Data source (default: yahooJSON)' },
+                    enrich => { type => 'boolean', description => 'Include company_info from FinanceDatabase. Default: true. Set false for raw quote data only.' },
                 },
                 required => ['symbol'],
             },
