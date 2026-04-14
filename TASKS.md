@@ -70,14 +70,14 @@ Comprehensive code review with 22 improvements across security, bugs, architectu
 
 ## v1.71 - MCP Enrichment
 
-Comprehensive MCP protocol enrichment: composite tools, discovery tools, resources, enriched descriptions, and protocol improvements. Grew from 8 tools to 14 tools + 3 resources.
+Comprehensive MCP protocol enrichment: composite tools, discovery tools, resources, enriched descriptions, and protocol improvements. Grew from 8 tools to 13 tools + 3 resources.
 
 ### Composite Tools (New)
 
 - [x] **`analyze_symbol`** - All-in-one tool: auto-resolves name/ticker via DB lookup/search, fetches live quote + detailed info in a single call. Eliminates multi-step lookup-then-quote workflows.
 - [x] **`get_portfolio`** - Batch quotes for multiple symbols in one call. Returns per-symbol results with method and currency info. Replaces repeated get_quote calls.
 - [x] **`compare_symbols`** - Side-by-side comparison of 2+ symbols: price, PE, yield, market cap, sector. Enriches with DB data (sector, industry, country) when available.
-- [x] **`convert_amount`** - Full currency conversion: rate + original_amount + converted_amount + display string. Extends get_currency with practical calculation.
+- [x] ~~**`convert_amount`**~~ - Removed: Finance::Quote already returns quotes in the requested currency via `get_quote(currency)`, and `get_currency` provides the rate for agents to multiply. An amount conversion tool adds no unique capability.
 
 ### Discovery Tools (New)
 
@@ -86,7 +86,7 @@ Comprehensive MCP protocol enrichment: composite tools, discovery tools, resourc
 
 ### Description Enrichment
 
-- [x] **All 14 tool descriptions enriched** - Every tool now includes: example inputs, output field names, guidance on when to use which tool, cross-references to related tools (e.g., filter_assets says "Use get_filter_options first").
+- [x] **All 13 tool descriptions enriched** - Every tool now includes: example inputs, output field names, guidance on when to use which tool, cross-references to related tools (e.g., filter_assets says "Use get_filter_options first").
 - [x] **Error messages include actionable hints** - Required field errors now show examples of valid values.
 
 ### Protocol Improvements

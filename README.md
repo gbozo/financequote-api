@@ -258,7 +258,7 @@ Visit **http://localhost:3001** in your browser for:
 
 ### MCP Protocol (for AI Agents)
 
-The MCP endpoint (`POST /mcp`) allows AI agents and LLMs to access financial data via JSON-RPC 2.0. With 14 tools and 3 resources, agents can do everything from single quotes to full portfolio analysis in one call.
+The MCP endpoint (`POST /mcp`) allows AI agents and LLMs to access financial data via JSON-RPC 2.0. With 13 tools and 3 resources, agents can do everything from single quotes to full portfolio analysis in one call.
 
 ```bash
 # Initialize connection
@@ -297,18 +297,6 @@ curl -X POST http://localhost:3001/mcp \
     }
   }'
 
-# Convert an amount between currencies
-curl -X POST http://localhost:3001/mcp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc":"2.0",
-    "id":5,
-    "method":"tools/call",
-    "params":{
-      "name":"convert_amount",
-      "arguments":{"from":"USD","to":"EUR","amount":1000}
-    }
-  }'
 
 # List available resources
 curl -X POST http://localhost:3001/mcp \
@@ -316,14 +304,13 @@ curl -X POST http://localhost:3001/mcp \
   -d '{"jsonrpc":"2.0","id":6,"method":"resources/list"}'
 ```
 
-**Available MCP Tools (14):**
+**Available MCP Tools (13):**
 
 | Category | Tool | Description |
 |----------|------|-------------|
 | **Composite** | `analyze_symbol` | All-in-one: resolves name/ticker, fetches live quote + info + DB data |
 | **Composite** | `get_portfolio` | Batch quotes for multiple symbols in one call |
 | **Composite** | `compare_symbols` | Side-by-side comparison of 2+ symbols |
-| **Composite** | `convert_amount` | Currency conversion with amount calculation |
 | **Quotes** | `get_quote` | Fetch stock/ETF quotes by ticker |
 | **Quotes** | `get_symbol_info` | Detailed symbol information |
 | **Quotes** | `get_currency` | Exchange rate between two currencies |

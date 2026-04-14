@@ -157,7 +157,7 @@ use Finance::Quote;
     });
     FQUtils::register_route('/mcp', 'post', {
         summary => 'MCP Endpoint',
-        description => 'Model Context Protocol JSON-RPC 2.0 endpoint. Supports: initialize, tools/list, tools/call, resources/list, resources/read, notifications/initialized. 14 tools available including composite analysis and portfolio tools.',
+        description => 'Model Context Protocol JSON-RPC 2.0 endpoint. Supports: initialize, tools/list, tools/call, resources/list, resources/read, notifications/initialized. 13 tools available including composite analysis and portfolio tools.',
         responses => { '200' => { description => 'JSON-RPC response' } },
     });
     FQUtils::register_route('/mcp', 'get', {
@@ -645,48 +645,6 @@ use Finance::Quote;
             return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($output) }] });
         }
 
-        if ($tool_name eq 'convert_amount') {
-            my $amount = $tool_args->{amount};
-            my $from = $tool_args->{from} // '';
-            my $to = $tool_args->{to} // '';
-
-            return jsonrpc_error($id, -32602, "Invalid params", "amount, from, and to are all required. Example: amount=100, from=USD, to=EUR")
-                unless defined($amount) && $from && $to;
-
-            return jsonrpc_error($id, -32602, "Invalid params", "amount must be a positive number")
-                unless $amount =~ /^[\d.]+$/ && $amount > 0;
-
-            my $cache_key = build_cache_key('currency', $from, $to);
-            my $cached = FQCache::get($cache_key);
-            my $rate_data;
-
-            if ($cached) {
-                my $parsed = JSON::XS::decode_json($cached->[2][0]);
-                $rate_data = $parsed->{data};
-            } else {
-                $rate_data = _fetch_currency_data($from, $to);
-                if ($rate_data) {
-                    my $response = json_response('success', $rate_data);
-                    FQCache::set($cache_key, $response);
-                }
-            }
-
-            if ($rate_data && $rate_data->{rate}) {
-                my $converted = sprintf("%.4f", $amount * $rate_data->{rate});
-                my $result = {
-                    from             => $from,
-                    to               => $to,
-                    rate             => $rate_data->{rate},
-                    original_amount  => $amount + 0,
-                    converted_amount => $converted + 0,
-                    display          => "$amount $from = $converted $to",
-                };
-                return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($result) }] });
-            }
-            return jsonrpc_error($id, -32001, "Currency conversion failed",
-                "Cannot convert $from to $to. Verify both are valid ISO 4217 currency codes.");
-        }
-
         # --- Original tools ---
 
         if ($tool_name eq 'get_quote') {
@@ -871,20 +829,6 @@ use Finance::Quote;
                     required => ['symbols'],
                 },
             },
-            {
-                name => 'convert_amount',
-                description => 'Convert a monetary amount between currencies. Returns the exchange rate AND the converted amount. Example: amount=1000, from=USD, to=EUR. Returns: { rate: 0.92, original_amount: 1000, converted_amount: 920.00, display: "1000 USD = 920.00 EUR" }',
-                inputSchema => {
-                    type => 'object',
-                    properties => {
-                        amount => { type => 'number', description => 'Amount to convert (e.g., 1000)' },
-                        from   => { type => 'string', description => 'Source currency ISO 4217 code (e.g., USD, GBP, JPY)' },
-                        to     => { type => 'string', description => 'Target currency ISO 4217 code (e.g., EUR, CHF, CNY)' },
-                    },
-                    required => ['amount', 'from', 'to'],
-                },
-            },
-
             # --- Core data tools ---
             {
                 name => 'get_quote',
@@ -913,7 +857,7 @@ use Finance::Quote;
             },
             {
                 name => 'get_currency',
-                description => 'Get the exchange rate between two currencies. Returns: { from, to, rate }. For converting an actual amount, use convert_amount instead. Example: from=USD, to=EUR returns { rate: 0.92 }',
+                description => 'Get the exchange rate between two currencies. Returns: { from, to, rate }. To convert an amount, multiply by the rate. Example: from=USD, to=EUR returns { rate: 0.92 }. Note: get_quote with currency parameter returns quotes already converted.',
                 inputSchema => {
                     type => 'object',
                     properties => {

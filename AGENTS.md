@@ -218,7 +218,7 @@ Resources provide static/semi-static data that agents can read without tool call
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
-| **Composite** | `analyze_symbol`, `get_portfolio`, `compare_symbols`, `convert_amount` | Multi-step workflows in one call |
+| **Composite** | `analyze_symbol`, `get_portfolio`, `compare_symbols` | Multi-step workflows in one call |
 | **Quotes** | `get_quote`, `get_symbol_info`, `get_currency` | Direct Finance::Quote access |
 | **Discovery** | `list_methods`, `get_asset_types`, `get_filter_options` | Help agents understand available data |
 | **Database** | `search_assets`, `lookup_symbol`, `filter_assets`, `get_db_stats` | FinanceDatabase queries |
