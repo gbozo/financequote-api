@@ -65,9 +65,19 @@ RUN chown -R appuser:appgroup /app /data /var/log/cron.log && chmod -R a+rX /app
 # Switch to non-root user
 USER appuser
 
-# Run database import on startup only if DB is empty/missing, then cron and plackup
+# Run database import on startup only if DB is empty/missing/corrupt, then cron and plackup
 CMD ["sh", "-c", "\
   DB_PATH=\"${FQ_DB_PATH:-/data/finance_database.db}\"; \
+  if [ -f \"$DB_PATH\" ] && [ -s \"$DB_PATH\" ]; then \
+    INTEGRITY=$(sqlite3 \"$DB_PATH\" 'PRAGMA integrity_check;' 2>&1 || true); \
+    if [ \"$INTEGRITY\" != 'ok' ]; then \
+      BACKUP=\"${DB_PATH}.corrupt.$(date +%Y%m%d%H%M%S)\"; \
+      echo \"Database corrupt: $INTEGRITY\"; \
+      echo \"Renaming to $BACKUP and recreating...\"; \
+      mv \"$DB_PATH\" \"$BACKUP\"; \
+      rm -f \"${DB_PATH}-wal\" \"${DB_PATH}-shm\"; \
+    fi; \
+  fi; \
   if [ ! -f \"$DB_PATH\" ] || [ ! -s \"$DB_PATH\" ] || \
      ! python3 -c \"import sqlite3; c=sqlite3.connect('$DB_PATH'); r=c.execute('SELECT COUNT(*) FROM sqlite_master WHERE type=\\\"table\\\" AND name NOT LIKE \\\"quotes_%\\\"').fetchone(); exit(0 if r[0]>0 else 1)\" 2>/dev/null; then \
     echo 'First run: importing FinanceDatabase...'; \

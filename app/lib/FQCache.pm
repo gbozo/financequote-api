@@ -14,6 +14,7 @@ my $ttl = 900;
 my $enabled = 1;
 my $db_path;
 my $dbh;
+my $integrity_checked = 0;
 
 sub configure {
     my ($env_ttl, $env_enabled, $env_db_path) = @_;
@@ -32,6 +33,27 @@ sub _get_dbh {
         eval { $dbh->disconnect };
         $dbh = undef;
     }
+
+    # On first connect, check integrity and recover if corrupt
+    if (!$integrity_checked && $db_path && -f $db_path && -s $db_path) {
+        $integrity_checked = 1;
+        my $test_dbh = DBI->connect("dbi:SQLite:dbname=$db_path", "", "", {
+            PrintError => 0, RaiseError => 0,
+        });
+        if ($test_dbh) {
+            my $row = eval { $test_dbh->selectrow_arrayref("PRAGMA integrity_check") };
+            my $result = $row ? $row->[0] : 'error';
+            $test_dbh->disconnect;
+            if ($result ne 'ok') {
+                warn "FQCache: Database corrupt ($result), renaming and recreating\n";
+                my $backup = $db_path . '.corrupt.' . time();
+                rename $db_path, $backup;
+                unlink "${db_path}-wal", "${db_path}-shm";
+            }
+        }
+    }
+    $integrity_checked = 1;
+
     $dbh = DBI->connect("dbi:SQLite:dbname=$db_path", "", "", {
         PrintError => 1,
         RaiseError => 0,

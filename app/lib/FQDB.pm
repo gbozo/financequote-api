@@ -6,6 +6,7 @@ use DBI;
 
 my $db_path = $ENV{'FQ_DB_PATH'} // '/data/finance_database.db';
 my $dbh;
+my $integrity_checked = 0;
 
 # Whitelist of valid table names to prevent SQL injection
 my %VALID_TABLES = map { $_ => 1 } qw(equities etfs funds indices currencies cryptos moneymarkets);
@@ -84,6 +85,27 @@ sub get_connection {
         }
     }
     return $dbh if $dbh;
+
+    # On first connect, check integrity and recover if corrupt
+    if (!$integrity_checked && -f $db_path && -s $db_path) {
+        $integrity_checked = 1;
+        my $test_dbh = DBI->connect("dbi:SQLite:dbname=$db_path", "", "", {
+            PrintError => 0, RaiseError => 0,
+        });
+        if ($test_dbh) {
+            my $row = eval { $test_dbh->selectrow_arrayref("PRAGMA integrity_check") };
+            my $result = $row ? $row->[0] : 'error';
+            $test_dbh->disconnect;
+            if ($result ne 'ok') {
+                warn "FQDB: Database corrupt ($result), renaming and recreating\n";
+                my $backup = $db_path . '.corrupt.' . time();
+                rename $db_path, $backup;
+                unlink "${db_path}-wal", "${db_path}-shm";
+            }
+        }
+    }
+    $integrity_checked = 1;
+
     $dbh = DBI->connect("dbi:SQLite:dbname=$db_path", "", "", {
         PrintError => 1,
         RaiseError => 0,
