@@ -117,6 +117,12 @@ sub dispatch {
         return FQUtils::json_response('success', { results => $results, count => scalar(@$results) });
     }
 
+    # --- Stock Chart Card ---
+
+    if ($path =~ m{^/api/v1/chart/([^/]+)$}) {
+        return FQAPI::handle_chart($1, $params);
+    }
+
     # --- Quote History endpoints ---
 
     if ($path =~ m{^/api/v1/history/([^/]+)$}) {

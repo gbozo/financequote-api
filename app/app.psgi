@@ -16,6 +16,7 @@ use FQDB;
 use FQUtils;
 use FQRouter;
 use FQMCP;
+use FQChart;
 
 use Plack::Builder;
 use Finance::Quote;
@@ -171,6 +172,19 @@ use Finance::Quote;
         summary => 'History Overview',
         description => 'Get list of symbols with historical data and date ranges',
         responses => { '200' => { description => 'Symbols with history stats' } },
+    });
+        FQUtils::register_route('/api/v1/chart/{symbol}', 'get', {
+        summary => 'Stock Chart Card',
+        description => 'Generate an SVG stock card with price chart, metrics, and company info. Returns SVG image or base64-encoded SVG in JSON.',
+        params => [
+            { name => 'symbol', in => 'path', required => 1, type => 'string', description => 'Ticker symbol' },
+            { name => 'size', in => 'query', type => 'string', description => 'Card size: small (400x250), medium (600x400), large (800x500). Default: medium' },
+            { name => 'method', in => 'query', type => 'string', description => 'Quote method (default: yahooJSON)' },
+            { name => 'currency', in => 'query', type => 'string', description => 'Currency for prices' },
+            { name => 'days', in => 'query', type => 'integer', description => 'Days of history to show (default: 90)' },
+            { name => 'format', in => 'query', type => 'string', description => 'Response format: svg (raw SVG), json (base64 in JSON), html (embedded HTML). Default: svg' },
+        ],
+        responses => { '200' => { description => 'SVG image or JSON with base64 SVG' } },
     });
     FQUtils::register_route('/mcp', 'post', {
         summary => 'MCP Endpoint',
@@ -481,6 +495,119 @@ use Finance::Quote;
             symbols => $symbols,
             stats   => $stats,
         });
+    }
+
+    # ============================================
+    # Stock Chart Card Handler
+    # ============================================
+
+    sub handle_chart {
+        my ($symbol, $params) = @_;
+        my $size     = $params->{size} || 'medium';
+        my $method   = _normalize_method($params->{method} || 'YahooJSON');
+        my $currency = $params->{currency} || '';
+        my $days     = $params->{days} || 90;
+        my $format   = $params->{format} || 'svg';
+
+        # Validate size
+        my %valid_sizes = map { $_ => 1 } qw(small medium large);
+        $size = 'medium' unless $valid_sizes{$size};
+
+        # Validate format
+        my %valid_formats = map { $_ => 1 } qw(svg json html);
+        $format = 'svg' unless $valid_formats{$format};
+
+        # Fetch live quote data
+        my $info = {};
+        eval {
+            my $cache_key = build_cache_key('info', $symbol, $method);
+            my $cached = FQCache::get($cache_key);
+            if ($cached) {
+                my $parsed = JSON::XS::decode_json($cached->[2][0]);
+                $info = $parsed->{data} // {};
+            } else {
+                $info = _fetch_info_data($symbol, $method);
+                my $response = json_response('success', $info);
+                FQCache::set($cache_key, $response);
+            }
+        };
+
+        # Fetch history data
+        my $history = FQDB::get_history(
+            symbol => $symbol,
+            limit  => $days,
+        );
+        # History comes in DESC order, reverse for chart (oldest first)
+        $history = [ reverse @$history ] if $history && @$history;
+
+        # DB enrichment
+        my $db_info = {};
+        eval {
+            $db_info = FQDB::lookup_symbol($symbol) // {};
+        };
+
+        # Determine price/change from info or latest history
+        my $price      = $info->{close} // $info->{last};
+        my $change     = $info->{change};
+        my $pct_change = $info->{pct_change};
+        my $name       = $info->{name} // $db_info->{name} // '';
+        my $exchange   = $info->{exchange} // $db_info->{exchange} // '';
+        my $cur        = $info->{currency} // $currency || 'USD';
+
+        # If no live data, try to get from latest history
+        if (!defined $price && $history && @$history) {
+            my $latest = $history->[-1];
+            $price      = $latest->{close} // $latest->{last};
+            $name     //= $latest->{name} // '';
+            $exchange //= $latest->{exchange} // '';
+            $cur      //= $latest->{currency} // 'USD';
+        }
+
+        # Generate SVG
+        my $svg = FQChart::generate_card(
+            size       => $size,
+            symbol     => uc($symbol),
+            name       => $name,
+            price      => $price,
+            change     => $change,
+            pct_change => $pct_change,
+            currency   => $cur,
+            exchange   => $exchange,
+            history    => $history // [],
+            info       => $info,
+            db_info    => $db_info,
+        );
+
+        # Return in requested format
+        if ($format eq 'json') {
+            require MIME::Base64;
+            my $b64 = MIME::Base64::encode_base64($svg, '');
+            return json_response('success', {
+                symbol  => uc($symbol),
+                size    => $size,
+                format  => 'svg+base64',
+                image   => $b64,
+                data_uri => "data:image/svg+xml;base64,$b64",
+                width   => FQChart::available_sizes()->{$size}{width},
+                height  => FQChart::available_sizes()->{$size}{height},
+            });
+        }
+
+        if ($format eq 'html') {
+            my $dim = FQChart::available_sizes()->{$size};
+            my $html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\">" .
+                "<title>$symbol Stock Card</title>" .
+                "<style>body{margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#0f0f1a;}</style>" .
+                "</head><body>$svg</body></html>";
+            return [ 200, [ 'Content-Type' => 'text/html; charset=utf-8', 'Access-Control-Allow-Origin' => '*' ], [ $html ] ];
+        }
+
+        # Default: raw SVG
+        return [ 200, [
+            'Content-Type' => 'image/svg+xml',
+            'Access-Control-Allow-Origin' => '*',
+            'Cache-Control' => 'public, max-age=300',
+        ], [ $svg ] ];
     }
 
     # ============================================

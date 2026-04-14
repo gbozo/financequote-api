@@ -14,6 +14,7 @@ use JSON::XS qw(encode_json);
 use FQUtils;
 use FQCache;
 use FQDB;
+use FQChart;
 
 # ============================================
 # Module state - set via configure()
@@ -464,6 +465,92 @@ sub _handle_tool_call {
         }) }] });
     }
 
+    # --- Chart tool ---
+
+    if ($tool_name eq 'get_stock_card') {
+        my $symbol   = $tool_args->{symbol} // '';
+        my $size     = $tool_args->{size} // 'medium';
+        my $method   = $tool_args->{method} // 'yahooJSON';
+        my $currency = $tool_args->{currency} // '';
+        my $days     = $tool_args->{days} // 90;
+
+        return _jsonrpc_error($id, -32602, "Invalid params",
+            "symbol is required. Example: AAPL")
+            unless $symbol;
+
+        # Validate size
+        my %valid_sizes = map { $_ => 1 } qw(small medium large);
+        $size = 'medium' unless $valid_sizes{$size};
+
+        # Fetch info
+        my $info = {};
+        eval {
+            my $cache_key = _build_cache_key('info', $symbol, $method);
+            my $cached = FQCache::get($cache_key);
+            if ($cached) {
+                my $parsed = JSON::XS::decode_json($cached->[2][0]);
+                $info = $parsed->{data} // {};
+            } else {
+                $info = $fetch_info_fn->($symbol, $method);
+                my $response = _json_response('success', $info);
+                FQCache::set($cache_key, $response);
+            }
+        };
+
+        # Fetch history
+        my $history = FQDB::get_history(symbol => $symbol, limit => $days);
+        $history = [ reverse @$history ] if $history && @$history;
+
+        # DB enrichment
+        my $db_info = eval { FQDB::lookup_symbol($symbol) } // {};
+
+        my $price      = $info->{close} // $info->{last};
+        my $change     = $info->{change};
+        my $pct_change = $info->{pct_change};
+        my $name       = $info->{name} // $db_info->{name} // '';
+        my $exchange   = $info->{exchange} // $db_info->{exchange} // '';
+        my $cur        = $info->{currency} // $currency || 'USD';
+
+        if (!defined $price && $history && @$history) {
+            my $latest = $history->[-1];
+            $price      = $latest->{close} // $latest->{last};
+            $name     //= $latest->{name} // '';
+            $exchange //= $latest->{exchange} // '';
+            $cur      //= $latest->{currency} // 'USD';
+        }
+
+        my $svg = FQChart::generate_card(
+            size       => $size,
+            symbol     => uc($symbol),
+            name       => $name,
+            price      => $price,
+            change     => $change,
+            pct_change => $pct_change,
+            currency   => $cur,
+            exchange   => $exchange,
+            history    => $history // [],
+            info       => $info,
+            db_info    => $db_info,
+        );
+
+        require MIME::Base64;
+        my $b64 = MIME::Base64::encode_base64($svg, '');
+        my $dim = FQChart::available_sizes()->{$size};
+
+        my $output = {
+            symbol   => uc($symbol),
+            size     => $size,
+            width    => $dim->{width},
+            height   => $dim->{height},
+            format   => 'svg+base64',
+            image    => $b64,
+            data_uri => "data:image/svg+xml;base64,$b64",
+        };
+        return _jsonrpc_response($id, { content => [
+            { type => 'text', text => encode_json($output) },
+        ] });
+    }
+
     return _jsonrpc_error($id, -32601, "Tool not found",
         "Unknown tool: $tool_name. Use tools/list to see available tools.");
 }
@@ -638,6 +725,22 @@ sub _tool_definitions {
             name => 'get_history_overview',
             description => 'Get an overview of all symbols with historical data. Returns list of symbols with their date ranges and number of daily records. Useful to see what historical data is available before querying get_price_history.',
             inputSchema => { type => 'object', properties => {} },
+        },
+        # --- Chart tools ---
+        {
+            name => 'get_stock_card',
+            description => 'Generate an SVG stock card image with price chart, metrics, and company info. Returns a base64-encoded SVG image ready to display. Three sizes available: small (400x250, sparkline + price), medium (600x400, full chart + 52w range + volume), large (800x500, + PE/EPS/yield/cap + sector/country). The data_uri field can be used directly in HTML img tags. Example: symbol="AAPL", size="large"',
+            inputSchema => {
+                type => 'object',
+                properties => {
+                    symbol   => { type => 'string',  description => 'Ticker symbol (e.g., AAPL, MSFT)' },
+                    size     => { type => 'string',  description => 'Card size: small (400x250), medium (600x400, default), large (800x500)' },
+                    method   => { type => 'string',  description => 'Data source (default: yahooJSON)' },
+                    currency => { type => 'string',  description => 'Currency for prices (default: server FQ_CURRENCY)' },
+                    days     => { type => 'integer', description => 'Days of history for chart (default: 90)' },
+                },
+                required => ['symbol'],
+            },
         },
         # --- Utility tools ---
         {

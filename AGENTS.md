@@ -18,6 +18,7 @@ Quick reference for agents working on this project.
 | `/app/lib/FQMCP.pm` | MCP JSON-RPC dispatch, tools, resources, prompts |
 | `/app/lib/FQCache.pm` | SQLite-backed response cache with TTL |
 | `/app/lib/FQDB.pm` | SQLite database operations (table-whitelisted) |
+| `/app/lib/FQChart.pm` | SVG stock card generator (3 sizes: small/medium/large) |
 | `/app/lib/FQUtils.pm` | Utilities, JSON helpers, OpenAPI generator, VERSION |
 | `docker-compose.yaml` | Production deployment config |
 | `docker/Dockerfile` | Container build recipe |
@@ -60,6 +61,7 @@ Quick reference for agents working on this project.
 - **FQMCP.pm**: All MCP (Model Context Protocol) logic - JSON-RPC dispatch, tool definitions/handlers, resource definitions/reader, prompt definitions/handler. Configured at startup with references to shared `_fetch_*_data()` functions from FQAPI.
 - **FQCache.pm**: SQLite-backed response cache with configurable TTL. Stores full PSGI response arrays (status, headers as JSON, body). Uses same database file as FQDB (`FQ_DB_PATH`). Expired entries cleaned hourly by cron and on access.
 - **FQDB.pm**: SQLite interface for FinanceDatabase data and quotes history. Uses table name whitelisting, per-type column schemas, and type-aware queries (search, filter, get_filter_options adapt to each asset type's actual columns). Also manages `quotes_history` table for daily quote snapshots.
+- **FQChart.pm**: SVG stock card generator. Produces self-contained SVG images in three sizes: small (400x250, sparkline + price), medium (600x400, full chart + 52w range + volume), large (800x500, + PE/yield/EPS + sector/country). Used by both REST (`handle_chart`) and MCP (`get_stock_card`).
 - **FQUtils.pm**: Shared utilities - JSON response builders, `jsonrpc_response`/`jsonrpc_error`, OpenAPI spec generator, `sanitize_input()`, and the single `$VERSION` constant.
 
 ## Important Gotchas
@@ -247,6 +249,7 @@ Resources provide static/semi-static data that agents can read without tool call
 | **Discovery** | `list_methods`, `get_asset_types`, `get_filter_options` | Help agents understand available data |
 | **Database** | `search_assets`, `lookup_symbol`, `filter_assets`, `get_db_stats` | FinanceDatabase queries |
 | **History** | `get_price_history`, `get_history_overview` | Historical quote data (daily snapshots) |
+| **Charts** | `get_stock_card` | SVG stock card generation (3 sizes) |
 
 ### MCP Prompts
 

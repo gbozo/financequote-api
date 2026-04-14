@@ -5,7 +5,7 @@ use warnings;
 use JSON::XS qw(encode_json);
 
 # API version - single source of truth
-our $VERSION = '1.73';
+our $VERSION = '1.74';
 
 sub get_timestamp {
     my ($sec,$min,$hour,$mday,$mon,$year) = gmtime(time());

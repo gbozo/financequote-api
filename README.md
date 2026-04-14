@@ -262,11 +262,12 @@ Visit **http://localhost:3001** in your browser for:
 | `GET /api/v1/health` | Health check | — |
 | `GET /api/v1/history/:symbol` | Historical quote data | `/api/v1/history/AAPL?from=2024-01-01` |
 | `GET /api/v1/history` | History overview (all symbols) | — |
+| `GET /api/v1/chart/:symbol` | SVG stock card (3 sizes) | `/api/v1/chart/AAPL?size=medium&days=30` |
 | `POST /mcp` | MCP Protocol (JSON-RPC 2.0) | See MCP section below |
 
 ### MCP Protocol (for AI Agents)
 
-The MCP endpoint (`POST /mcp`) allows AI agents and LLMs to access financial data via JSON-RPC 2.0. With 15 tools, 3 resources, and 4 prompts, agents can do everything from single quotes to full portfolio analysis in one call.
+The MCP endpoint (`POST /mcp`) allows AI agents and LLMs to access financial data via JSON-RPC 2.0. With 16 tools, 3 resources, and 4 prompts, agents can do everything from single quotes to full portfolio analysis in one call.
 
 ```bash
 # Initialize connection
@@ -312,7 +313,7 @@ curl -X POST http://localhost:3001/mcp \
   -d '{"jsonrpc":"2.0","id":6,"method":"resources/list"}'
 ```
 
-**Available MCP Tools (15):**
+**Available MCP Tools (16):**
 
 | Category | Tool | Description |
 |----------|------|-------------|
@@ -331,6 +332,7 @@ curl -X POST http://localhost:3001/mcp \
 | **Database** | `get_db_stats` | Database statistics and row counts |
 | **History** | `get_price_history` | Historical quote data for a symbol (daily records) |
 | **History** | `get_history_overview` | Overview of all symbols with historical data |
+| **Charts** | `get_stock_card` | SVG stock card image (small/medium/large sizes) |
 
 **Available MCP Resources (3):**
 

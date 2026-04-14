@@ -198,6 +198,44 @@ Fixed critical data import issue: the import script used a one-size-fits-all equ
 
 ---
 
+## v1.74 - SVG Stock Card Generator
+
+Added `FQChart.pm` module for generating self-contained SVG stock card images in three sizes. Available via REST endpoint and MCP tool.
+
+### FQChart.pm Module
+
+New SVG generator with three card sizes:
+- [x] **Small (400x250)** - Symbol badge, price + change (green/red color), sparkline with gradient fill, date range footer
+- [x] **Medium (600x400)** - Full line chart with Y-axis/X-axis labels, grid lines, volume bars, 52-week range bar with position marker, stats row (High/Low/Volume/Open)
+- [x] **Large (800x500)** - Fundamentals row (P/E, EPS, Div Yield, Mkt Cap), company info row (Sector, Industry, Country, Exchange), FinanceQuote API watermark
+
+Dark theme color palette: `#1a1a2e` background, `#00c853` green, `#ff1744` red, `#00bcd4` accent.
+
+### REST Endpoint
+
+- [x] `GET /api/v1/chart/{symbol}` - SVG stock card generation
+  - Parameters: `size` (small/medium/large), `method`, `currency`, `days`, `format` (svg/json/html)
+  - Fetches live info + history + DB enrichment
+  - Three output formats: raw SVG, base64 JSON, embedded HTML page
+
+### MCP Tool
+
+- [x] `get_stock_card` - Returns base64-encoded SVG + data URI for AI agents (16 tools total)
+
+### Files Changed
+
+| File | Changes |
+|------|---------|
+| `app/lib/FQChart.pm` | New module - SVG stock card generator |
+| `app/app.psgi` | `handle_chart()` handler, route registration |
+| `app/lib/FQRouter.pm` | Route: `/api/v1/chart/{symbol}` |
+| `app/lib/FQMCP.pm` | `get_stock_card` tool definition + handler |
+| `app/lib/FQUtils.pm` | VERSION 1.74 |
+| `AGENTS.md` | FQChart module docs, Charts MCP category |
+| `README.md` | Chart endpoint, 16 MCP tools |
+
+---
+
 ## v1.73 - SQLite Cache + Quote History
 
 Replaced in-memory cache with SQLite-backed `quotes_cache` table and added permanent `quotes_history` table for daily quote snapshots with searchable columns. Persistent storage via Docker volumes replaces tmpfs.
