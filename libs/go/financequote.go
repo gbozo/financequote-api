@@ -10,8 +10,8 @@ import (
 
 // Client represents a FinanceQuote API client
 type Client struct {
-	BaseURL string
-	APIKey  string
+	BaseURL    string
+	APIKey     string
 	httpClient *http.Client
 }
 
@@ -34,25 +34,25 @@ type QuoteParams struct {
 
 // Quote represents a single stock quote
 type Quote struct {
-	Symbol          string  `json:"symbol"`
-	Name            string  `json:"name"`
-	Last            float64 `json:"last,string"`
-	Date            string  `json:"date"`
-	Time            string  `json:"time"`
-	Currency        string  `json:"currency"`
-	Success         int     `json:"success"`
-	Method          string  `json:"method"`
-	Exchange        string  `json:"exchange"`
-	Open            float64 `json:"open,string"`
-	High            float64 `json:"high,string"`
-	Low             float64 `json:"low,string"`
-	Close           float64 `json:"close,string"`
-	Volume          int     `json:"volume,string"`
-	MarketCap       int64   `json:"market_cap,string"`
-	EPS             float64 `json:"eps,string"`
-	PE             float64 `json:"pe,string"`
-	DivYield        float64 `json:"div_yield,string"`
-	YearRange       string  `json:"year_range"`
+	Symbol    string  `json:"symbol"`
+	Name      string  `json:"name"`
+	Last      float64 `json:"last,string"`
+	Date      string  `json:"date"`
+	Time      string  `json:"time"`
+	Currency  string  `json:"currency"`
+	Success   int     `json:"success"`
+	Method    string  `json:"method"`
+	Exchange  string  `json:"exchange"`
+	Open      float64 `json:"open,string"`
+	High      float64 `json:"high,string"`
+	Low       float64 `json:"low,string"`
+	Close     float64 `json:"close,string"`
+	Volume    int     `json:"volume,string"`
+	MarketCap int64   `json:"market_cap,string"`
+	EPS       float64 `json:"eps,string"`
+	PE        float64 `json:"pe,string"`
+	DivYield  float64 `json:"div_yield,string"`
+	YearRange string  `json:"year_range"`
 }
 
 // Response represents the API response
@@ -94,7 +94,7 @@ func (c *Client) GetQuotes(symbols []string, params *QuoteParams) (map[string]*Q
 
 	// Build URL
 	url := fmt.Sprintf("%s/api/v1/quote/%s", c.BaseURL, strings.Join(symbols, ","))
-	
+
 	if params != nil {
 		query := ""
 		if params.Method != "" {
@@ -136,9 +136,10 @@ func (c *Client) GetQuotes(symbols []string, params *QuoteParams) (map[string]*Q
 	}
 
 	if result.Status != "success" {
-		var errResp ErrorResponse
-		json.Unmarshal([]byte(result.Data["error"].(string)), &errResp) // simplified
-		return nil, fmt.Errorf("API error: %s", result.Data["error"])
+		if errMsg, ok := result.Data["error"]; ok {
+			return nil, fmt.Errorf("API error: %v", errMsg)
+		}
+		return nil, fmt.Errorf("API error: unknown")
 	}
 
 	// Convert to quotes map
@@ -147,9 +148,14 @@ func (c *Client) GetQuotes(symbols []string, params *QuoteParams) (map[string]*Q
 		if symbol == "methods" {
 			continue
 		}
-		jsonData, _ := json.Marshal(data)
+		jsonData, err := json.Marshal(data)
+		if err != nil {
+			continue
+		}
 		var quote Quote
-		json.Unmarshal(jsonData, &quote)
+		if err := json.Unmarshal(jsonData, &quote); err != nil {
+			continue
+		}
 		quotes[symbol] = &quote
 	}
 
@@ -159,7 +165,7 @@ func (c *Client) GetQuotes(symbols []string, params *QuoteParams) (map[string]*Q
 // GetMethods returns all available quote methods
 func (c *Client) GetMethods() ([]string, error) {
 	url := fmt.Sprintf("%s/api/v1/methods", c.BaseURL)
-	
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -180,10 +186,15 @@ func (c *Client) GetMethods() ([]string, error) {
 		return nil, err
 	}
 
-	methodsData := result.Data["methods"].([]interface{})
-	methods := make([]string, len(methodsData))
-	for i, m := range methodsData {
-		methods[i] = m.(string)
+	methodsData, ok := result.Data["methods"].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format for methods")
+	}
+	methods := make([]string, 0, len(methodsData))
+	for _, m := range methodsData {
+		if s, ok := m.(string); ok {
+			methods = append(methods, s)
+		}
 	}
 
 	return methods, nil
@@ -199,7 +210,7 @@ type CurrencyRate struct {
 // GetCurrency fetches currency conversion rate
 func (c *Client) GetCurrency(from, to string) (*CurrencyRate, error) {
 	url := fmt.Sprintf("%s/api/v1/currency/%s/%s", c.BaseURL, from, to)
-	
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -224,8 +235,15 @@ func (c *Client) GetCurrency(from, to string) (*CurrencyRate, error) {
 		return nil, fmt.Errorf("currency conversion failed")
 	}
 
-	data := result.Data[from+to].(map[string]interface{})
-	rate, _ := data["rate"].(float64)
+	// API returns {status: "success", data: {from, to, rate}}
+	rateVal, ok := result.Data["rate"]
+	if !ok {
+		return nil, fmt.Errorf("rate not found in response")
+	}
+	rate, ok := rateVal.(float64)
+	if !ok {
+		return nil, fmt.Errorf("unexpected rate type in response")
+	}
 
 	return &CurrencyRate{
 		From: from,
@@ -237,7 +255,7 @@ func (c *Client) GetCurrency(from, to string) (*CurrencyRate, error) {
 // HealthCheck checks if the API is healthy
 func (c *Client) HealthCheck() (bool, error) {
 	url := fmt.Sprintf("%s/api/v1/health", c.BaseURL)
-	
+
 	resp, err := c.httpClient.Get(url)
 	if err != nil {
 		return false, err

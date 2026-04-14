@@ -7,10 +7,28 @@ use DBI;
 my $db_path = '/tmp/finance_database.db';
 my $dbh;
 
+# Whitelist of valid table names to prevent SQL injection
+my %VALID_TABLES = map { $_ => 1 } qw(equities etfs funds indices currencies cryptos moneymarkets);
+
+sub _validate_table {
+    my ($type) = @_;
+    my $t = lc($type // '');
+    return $t if $VALID_TABLES{$t};
+    return undef;
+}
+
 sub get_connection {
+    # Reconnect if handle is stale or lost
+    if ($dbh) {
+        my $ok = eval { $dbh->do("SELECT 1"); 1 };
+        unless ($ok) {
+            eval { $dbh->disconnect };
+            $dbh = undef;
+        }
+    }
     return $dbh if $dbh;
     $dbh = DBI->connect("dbi:SQLite:dbname=$db_path", "", "", {
-        PrintError => 0,
+        PrintError => 1,
         RaiseError => 0,
     });
     if ($dbh) {
@@ -38,20 +56,32 @@ sub search {
     
     my @primary_exchanges = ('NMS', 'NAS', 'NYS', 'NYQ', 'NCM', 'LSE', 'HKG', 'JPX', 'ASX', 'NSE', 'TWO', 'KOE', 'KSC', 'SES', 'SET', 'STO', 'CPH', 'HEL', 'OSL', 'VIE', 'AMS', 'PAR', 'MIL', 'FRA', 'MUN', 'DUS', 'BER', 'BRU', 'LIS', 'MAD');
     
-    my @tables = $type ? ($type) : ('equities', 'etfs', 'funds', 'indices', 'currencies', 'cryptos', 'moneymarkets');
+    my @tables;
+    if ($type) {
+        my $valid = _validate_table($type);
+        return [] unless $valid;
+        @tables = ($valid);
+    } else {
+        @tables = sort keys %VALID_TABLES;
+    }
     my @results;
     
     foreach my $table (@tables) {
         my $where_clause = "WHERE (symbol LIKE ? OR name LIKE ? OR isin LIKE ?)";
+        my @bind = ("%$query%", "%$query%", "%$query%");
+        
         if ($primary_only) {
-            my $in_list = join(",", map { "'$_'" } @primary_exchanges);
-            $where_clause .= " AND exchange IN ($in_list)";
+            my $placeholders = join(",", ("?") x scalar(@primary_exchanges));
+            $where_clause .= " AND exchange IN ($placeholders)";
+            push @bind, @primary_exchanges;
         }
+        
+        push @bind, $limit;
         
         my $stmt = "SELECT symbol, name, exchange, country, sector, market_cap, isin FROM $table $where_clause LIMIT ?";
         my $sth = eval { $db->prepare($stmt) };
         next unless $sth;
-        $sth->execute("%$query%", "%$query%", "%$query%", $limit);
+        $sth->execute(@bind);
         
         while (my $row = $sth->fetchrow_hashref) {
             $row->{type} = $table;
@@ -73,17 +103,24 @@ sub lookup_symbol {
     my $db = get_connection();
     return {} unless $db;
     
-    my @tables = $types ? @$types : ('equities', 'etfs', 'funds', 'indices', 'currencies', 'cryptos', 'moneymarkets');
+    my @tables;
+    if ($types && @$types) {
+        @tables = grep { _validate_table($_) } @$types;
+    } else {
+        @tables = sort keys %VALID_TABLES;
+    }
     
     foreach my $table (@tables) {
-        my $stmt = "SELECT * FROM $table WHERE symbol = ?";
+        my $valid = _validate_table($table);
+        next unless $valid;
+        my $stmt = "SELECT * FROM $valid WHERE symbol = ?";
         my $sth = eval { $db->prepare($stmt) };
         next unless $sth;
         $sth->execute($symbol);
         
         if (my $row = $sth->fetchrow_hashref) {
             $sth->finish;
-            $row->{type} = $table;
+            $row->{type} = $valid;
             return $row;
         }
         $sth->finish;
@@ -98,7 +135,9 @@ sub filter {
     my $db = get_connection();
     return [] unless $db;
     
-    my $type = $opts{type} // 'equities';
+    my $type = _validate_table($opts{type} // 'equities');
+    return [] unless $type;
+    
     my $sector = $opts{sector};
     my $country = $opts{country};
     my $exchange = $opts{exchange};
@@ -109,11 +148,11 @@ sub filter {
     my @conditions;
     my @params;
     
-    push @conditions, "sector = ?" and push @params, $sector if $sector;
-    push @conditions, "country = ?" and push @params, $country if $country;
-    push @conditions, "exchange = ?" and push @params, $exchange if $exchange;
-    push @conditions, "market_cap = ?" and push @params, $market_cap if $market_cap;
-    push @conditions, "industry LIKE ?" and push @params, "%$industry%" if $industry;
+    if ($sector)     { push @conditions, "sector = ?";       push @params, $sector; }
+    if ($country)    { push @conditions, "country = ?";      push @params, $country; }
+    if ($exchange)   { push @conditions, "exchange = ?";     push @params, $exchange; }
+    if ($market_cap) { push @conditions, "market_cap = ?";   push @params, $market_cap; }
+    if ($industry)   { push @conditions, "industry LIKE ?";  push @params, "%$industry%"; }
     
     my $where = @conditions ? "WHERE " . join(" AND ", @conditions) : "";
     
@@ -135,48 +174,25 @@ sub filter {
 
 sub get_filter_options {
     my ($type) = @_;
-    $type //= 'equities';
+    $type = _validate_table($type // 'equities');
+    return {} unless $type;
     
     my $db = get_connection();
     return {} unless $db;
     
     my %options;
     
-    my $sth = eval { $db->prepare("SELECT DISTINCT sector FROM $type WHERE sector IS NOT NULL ORDER BY sector") };
-    return {} unless $sth;
-    $sth->execute();
-    $options{sectors} = [];
-    while (my $row = $sth->fetch()) {
-        push @{$options{sectors}}, $row->[0] if $row->[0];
-    }
-    $sth->finish;
-    
-    $sth = eval { $db->prepare("SELECT DISTINCT country FROM $type WHERE country IS NOT NULL ORDER BY country") };
-    if ($sth) {
+    for my $col (qw(sector country exchange market_cap)) {
+        my $key = $col eq 'market_cap' ? 'market_caps' : "${col}s";
+        # sector -> sectors, country -> countries (close enough), etc.
+        $key = 'countries' if $col eq 'country';
+        
+        my $sth = eval { $db->prepare("SELECT DISTINCT $col FROM $type WHERE $col IS NOT NULL ORDER BY $col") };
+        next unless $sth;
         $sth->execute();
-        $options{countries} = [];
+        $options{$key} = [];
         while (my $row = $sth->fetch()) {
-            push @{$options{countries}}, $row->[0] if $row->[0];
-        }
-        $sth->finish;
-    }
-    
-    $sth = eval { $db->prepare("SELECT DISTINCT exchange FROM $type WHERE exchange IS NOT NULL ORDER BY exchange") };
-    if ($sth) {
-        $sth->execute();
-        $options{exchanges} = [];
-        while (my $row = $sth->fetch()) {
-            push @{$options{exchanges}}, $row->[0] if $row->[0];
-        }
-        $sth->finish;
-    }
-    
-    $sth = eval { $db->prepare("SELECT DISTINCT market_cap FROM $type WHERE market_cap IS NOT NULL ORDER BY market_cap") };
-    if ($sth) {
-        $sth->execute();
-        $options{market_caps} = [];
-        while (my $row = $sth->fetch()) {
-            push @{$options{market_caps}}, $row->[0] if $row->[0];
+            push @{$options{$key}}, $row->[0] if $row->[0];
         }
         $sth->finish;
     }
@@ -189,20 +205,20 @@ sub stats {
     return { error => "Database not available", status => "offline" } unless $db;
     
     my %stats;
+    my $total = 0;
     
-    my @tables = ('equities', 'etfs', 'funds', 'indices', 'currencies', 'cryptos', 'moneymarkets');
-    
-    foreach my $table (@tables) {
+    foreach my $table (sort keys %VALID_TABLES) {
         my $sth = eval { $db->prepare("SELECT COUNT(*) FROM $table") };
         next unless $sth;
         $sth->execute();
         my $row = $sth->fetch();
-        $stats{$table} = $row ? $row->[0] : 0;
+        my $count = $row ? $row->[0] : 0;
+        $stats{$table} = $count;
+        $total += $count;
         $sth->finish;
     }
     
-    $stats{total} = 0;
-    $stats{total} += $_ for values %stats;
+    $stats{total} = $total;
     
     return \%stats;
 }

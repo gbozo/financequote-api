@@ -124,11 +124,11 @@ class FinanceQuoteClient:
             error_info = data.get('error', {})
             raise ValueError(f"Currency error: {error_info.get('message', 'Unknown error')}")
         
-        # Find the rate in the response
-        rate_key = f"{from_currency}{to_currency}"
-        rate_data = data.get('data', {}).get(rate_key, {})
+        # The API returns {status: "success", data: {from, to, rate}}
+        rate_data = data.get('data', {})
+        rate = rate_data.get('rate', 0)
         
-        return float(rate_data.get('rate', 0))
+        return float(rate)
     
     def health_check(self) -> bool:
         """

@@ -122,10 +122,10 @@ class FinanceQuoteClient {
    * @returns {Promise<number>} Conversion rate
    */
   async getCurrency(fromCurrency, toCurrency) {
+    // API returns {status: "success", data: {from, to, rate}}
     const data = await this._makeRequest(`/api/v1/currency/${fromCurrency}/${toCurrency}`);
-    const key = `${fromCurrency}${toCurrency}`;
-    if (data[key] && data[key].rate) {
-      return parseFloat(data[key].rate);
+    if (data && data.rate !== undefined) {
+      return parseFloat(data.rate);
     }
     throw new Error('Currency rate not available');
   }

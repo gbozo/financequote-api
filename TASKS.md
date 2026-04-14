@@ -1,28 +1,76 @@
 # FinanceQuote API - Task List
 
-All tasks completed! 🎉
+## v1.70 - Code Review & Refactoring
 
-## Quick Start
+Comprehensive code review with 22 improvements across security, bugs, architecture, code quality, reliability, and polish.
 
-```bash
-# Navigate to project
-cd /usr/local/src/financequote
+### Critical - Security
 
-# Build and run
-docker compose -f docker/docker-compose.yaml up -d --build
+- [x] **#1 SQL injection in FQDB.pm** - Added `%VALID_TABLES` whitelist and `_validate_table()` function. All table names are now validated before use in SQL. Also converted `search()` primary_exchanges to use parameterized `IN (?)` placeholders instead of string interpolation.
 
-# Access API
-curl http://localhost:3001/api/v1/health
+### High - Bugs
 
-# View interactive docs
-open http://localhost:3001
-```
+- [x] **#2 Static image route double-slash** - FQRouter captures filename without leading slash, preventing `/app/public//images/...` paths.
+- [x] **#3 Makefile `uplocalnotdetached` ran detached** - Removed `-d` flag from the target so it actually runs in foreground.
+- [x] **#4 MCP cached data access pattern** - Removed `_extract_mcp_data` entirely. MCP now uses standard PSGI cache format `$cached->[2][0]` consistently (was using broken `$cached->[0][3][0]`).
+- [x] **#5 Python client `get_currency()` wrong response path** - Fixed to read `data["rate"]` directly instead of nested `data["USDEUR"]["rate"]`.
+- [x] **#6 `stats()` total includes itself** - Now accumulates total in a separate variable before adding to the result hash.
+
+### High - Architecture
+
+- [x] **#7 Extract routes to FQRouter.pm** - New module handles all HTTP plumbing: route dispatch, auth checking, CORS headers, static file serving, query string parsing. `app.psgi` now contains only handler business logic. Plack builder is 4 lines.
+- [x] **#8 MCP handler duplicates REST logic** - Extracted shared `_fetch_quotes_data()`, `_fetch_info_data()`, `_fetch_currency_data()` functions used by both REST handlers and MCP tools/call. MCP now uses same cache keys as REST (no duplicate caching). MCP handler split into `_mcp_tool_definitions()` and `_handle_mcp_tool_call()`.
+- [x] **#9 Unbounded cache growth** - Added `$max_entries` (default 10000) with LRU eviction to FQCache. `_evict()` first removes expired entries, then evicts oldest 10% by access time if still full. Configurable via `FQ_CACHE_MAX_ENTRIES` env var.
+
+### Medium - Code Quality
+
+- [x] **#10 `_normalize_method()` rebuilt map every call** - `%METHOD_MAP` now built once at startup in `app.psgi`.
+- [x] **#11 Version hardcoded in 3+ places** - Single `$FQUtils::VERSION` constant referenced by health, MCP initialize, and OpenAPI spec.
+- [x] **#12 JSON via string concatenation** - `jsonrpc_response()`, `jsonrpc_error()`, `json_error_response()` in FQUtils now build Perl hashes and call `encode_json()` instead of manual string building.
+- [x] **#13 `handle_info` used `split(/$;/)` instead of `index()`** - Changed to `index()` + `substr()` as recommended to avoid encoding issues with the subscript separator.
+- [x] **#14 Repetitive API key config** - Replaced 7 if-blocks with data-driven `%API_KEY_MODULES` hash and loop.
+- [x] **#15 `sanitize_input()` unused** - Kept in FQUtils for use by FQDB and future input validation.
+
+### Medium - Reliability
+
+- [x] **#16 Silent DB errors** - Changed `PrintError => 1` in FQDB (was 0), so DB errors are no longer silently swallowed.
+- [x] **#17 No DB connection recovery** - `get_connection()` now pings with `SELECT 1` and reconnects if the connection is stale (handles SQLite file replacement by cron).
+- [x] **#18 Auth blocks health endpoint** - FQRouter's `_is_public_path()` exempts `/api/v1/health` and static asset paths from API key authentication.
+
+### Low - Polish
+
+- [x] **#19 Go client unsafe type assertions** - All type assertions now use comma-ok pattern with proper error handling.
+- [x] **#20 Python import shadow in `import_financedatabase.py`** - Renamed `fd` variable to `lock_fh` in `acquire_lock()`/`release_lock()` to avoid shadowing the `financedatabase` module import.
+- [x] **#21 Node.js and Go client currency response path** - Both now read `data.rate` / `data["rate"]` directly matching actual API response format.
+- [x] **#22 FQCache `configure()` odd conditional** - Fixed to clean `if (defined $env_ttl && $env_ttl =~ /^\d+$/)` check.
+
+### Documentation
+
+- [x] **AGENTS.md revised** - Updated architecture diagram (added FQRouter layer), module responsibilities, all 10 gotchas revised (added whitelisting, VERSION, auth exemption), added `FQ_CACHE_MAX_ENTRIES` env var, updated adding-new-endpoints patterns (FQRouter route + shared `_fetch_*_data()`), updated common pitfalls (8 items), fixed testing commands, corrected port numbers.
+- [x] **TASKS.md updated** - This file; all 22 items documented with implementation details.
+- [x] **Makefile targets** - Added missing `testlocalspec` target and `testlocal` (runs all tests).
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `app/lib/FQDB.pm` | Table whitelist, parameterized queries, reconnect, PrintError |
+| `app/lib/FQCache.pm` | LRU eviction, max entries, configure() fix |
+| `app/lib/FQUtils.pm` | VERSION constant, encode_json() for all JSON, kept sanitize_input |
+| `app/lib/FQRouter.pm` | **NEW** - routing, auth, CORS, static files extracted from app.psgi |
+| `app/app.psgi` | Handlers only, shared _fetch_*_data(), METHOD_MAP at startup, data-driven API keys |
+| `Makefile` | Fixed uplocalnotdetached, added testlocalspec, testlocal |
+| `libs/python/financequote.py` | Fixed get_currency() response path |
+| `libs/go/financequote.go` | Safe type assertions, fixed GetCurrency() |
+| `libs/node/financequote.js` | Fixed getCurrency() response path |
+| `cron-scripts/import_financedatabase.py` | Fixed fd variable shadow |
+| `AGENTS.md` | Full revision reflecting new architecture |
 
 ---
 
-## Completed Tasks
+## Previous Tasks (v1.0 - v1.69)
 
-### Core Infrastructure ✅
+### Core Infrastructure
 - [x] Create SPEC.md with detailed API specification
 - [x] Create Dockerfile for Perl PSGI API
 - [x] Create docker-compose.yaml
@@ -30,7 +78,7 @@ open http://localhost:3001
 - [x] Create Makefile for build commands
 - [x] Create .env.example for environment variables
 
-### API Implementation ✅
+### API Implementation
 - [x] Create PSGI entry point (app.psgi)
 - [x] Implement /api/v1/health endpoint
 - [x] Implement /api/v1/methods endpoint
@@ -38,93 +86,31 @@ open http://localhost:3001
 - [x] Implement /api/v1/currency/:from/:to endpoint
 - [x] Implement /api/v1/fetch/:method/:symbols endpoint
 
-### Finance::Quote Integration ✅
+### Finance::Quote Integration
 - [x] Install Finance::Quote from CPAN (latest version)
 - [x] Integrate Finance::Quote module
 - [x] Configure quote fetchers (yahoojson, etc.)
 - [x] Configure currency conversion
 
-### Documentation ✅
+### Documentation
 - [x] Interactive API documentation at `/`
 - [x] Dynamic URL detection in docs
 - [x] Live methods table loaded from API
 - [x] Code examples for curl, Python, Go, JS
 
-### Security ✅
+### Security
 - [x] API key authentication via API_AUTH_KEYS
 - [x] Bearer token support
 - [x] Environment variable for API keys
 
-### Client Libraries ✅
+### Client Libraries
 - [x] Go client library (libs/go/)
 - [x] Python client library (libs/python/)
 - [x] Node.js client library (libs/node/)
 - [x] README for each library
 
-### Polish ✅
+### Polish
 - [x] JSON response ordering fixed
 - [x] ISO timestamp format
 - [x] CORS enabled
 - [x] GitHub-ready README.md
-
----
-
-## File Structure
-
-```
-/usr/local/src/financequote/
-├── README.md                    # GitHub landing page
-├── SPEC.md                      # Technical specification
-├── TASKS.md                     # This file
-├── LICENSE                      # MIT License
-├── docker/
-│   ├── Dockerfile               # Container definition
-│   ├── docker-compose.yaml     # Orchestration
-│   ├── .dockerignore           # Build exclusions
-│   └── .env.example            # Environment template
-├── api/
-│   ├── Makefile                # Build commands
-│   └── app/
-│       ├── bin/
-│       │   └── app.psgi        # API application
-│       └── public/
-│           └── index.html      # Interactive docs
-└── libs/
-    ├── README.md               # Libraries overview
-    ├── go/                     # Go client
-    ├── python/                 # Python client
-    └── node/                   # Node.js client
-```
-
----
-
-## Verification Commands
-
-```bash
-# Health check
-curl http://localhost:3001/api/v1/health
-
-# List methods
-curl http://localhost:3001/api/v1/methods
-
-# Get quote
-curl "http://localhost:3001/api/v1/quote/AAPL"
-
-# Multiple symbols
-curl "http://localhost:3001/api/v1/quote/AAPL,GOOGL"
-
-# Currency
-curl http://localhost:3001/api/v1/currency/USD/EUR
-
-# View docs
-open http://localhost:3001
-```
-
----
-
-## Notes
-
-- Finance::Quote is installed from CPAN during Docker build (always latest)
-- 45+ quote methods available
-- Some methods require API keys (AlphaVantage, TwelveData, etc.)
-- API authentication is optional (set API_AUTH_KEYS to enable)

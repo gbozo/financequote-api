@@ -46,7 +46,7 @@ uplocal:
 	docker compose -f $(COMPOSE_FILE_LOCAL) up --build -d
 
 uplocalnotdetached:
-	docker compose -f $(COMPOSE_FILE_LOCAL) up --build -d
+	docker compose -f $(COMPOSE_FILE_LOCAL) up --build
 
 downlocal:
 	docker compose -f $(COMPOSE_FILE_LOCAL) down
@@ -88,6 +88,13 @@ testlocalmcp:
 	@echo "Testing mcp:"
 	@curl -s -X POST http://localhost:3002/mcp -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | head -20
 	@echo
+
+testlocalspec:
+	@echo "Testing OpenAPI spec:"
+	@curl -s http://localhost:3002/api/v1/spec | head -20
+	@echo
+
+testlocal: testlocalmethods testlocalquote testlocalinfo testlocalcurrency testlocalmcp testlocalspec
 
 build:
 	docker build -t financequote-api:latest -f docker/Dockerfile .

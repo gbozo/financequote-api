@@ -13,10 +13,11 @@ Quick reference for agents working on this project.
 
 | File | Purpose |
 |------|---------|
-| `/app/app.psgi` | Main PSGI application |
-| `/app/lib/FQCache.pm` | In-memory cache module |
-| `/app/lib/FQDB.pm` | SQLite database operations |
-| `/app/lib/FQUtils.pm` | Utilities + OpenAPI generator |
+| `/app/app.psgi` | Handler business logic only (FQAPI package) |
+| `/app/lib/FQRouter.pm` | HTTP routing, auth, CORS, static file serving |
+| `/app/lib/FQCache.pm` | In-memory LRU cache with TTL and max size |
+| `/app/lib/FQDB.pm` | SQLite database operations (table-whitelisted) |
+| `/app/lib/FQUtils.pm` | Utilities, JSON helpers, OpenAPI generator, VERSION |
 | `docker-compose.yaml` | Production deployment config |
 | `docker/Dockerfile` | Container build recipe |
 | `mcp.json` | LMStudio MCP server config example |
@@ -29,17 +30,32 @@ Quick reference for agents working on this project.
 └────────┬────────┘
          │
 ┌────────▼────────┐
-│  Plack::Builder │  ← PSGI middleware/routing
+│  Plack::Builder │  ← PSGI entry point (4 lines in app.psgi)
 └────────┬────────┘
          │
 ┌────────▼────────┐
-│  FQAPI package  │  ← All handlers (handle_quote, handle_currency, etc.)
+│    FQRouter     │  ← Route dispatch, auth, CORS, static files, query parsing
 └────────┬────────┘
          │
 ┌────────▼────────┐
-│ Finance::Quote  │  ← CPAN module - actual quote fetching
-└─────────────────┘
+│  FQAPI package  │  ← Handler business logic (handle_quote, handle_mcp, etc.)
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    │         │
+┌───▼───┐ ┌──▼──┐
+│Finance│ │FQDB │  ← CPAN quote fetching / SQLite FinanceDatabase
+│::Quote│ │     │
+└───────┘ └─────┘
 ```
+
+### Module Responsibilities
+
+- **app.psgi**: Contains the `FQAPI` package with all handler functions. Developers add new features here. The Plack builder at the bottom just wires `FQRouter::dispatch()`.
+- **FQRouter.pm**: All HTTP plumbing - route regex matching, auth checking, CORS headers, static file serving, query string parsing. Developers should rarely need to touch this.
+- **FQCache.pm**: In-memory key/value cache with configurable TTL, max entry limit, and LRU eviction. Stores full PSGI response arrays.
+- **FQDB.pm**: SQLite interface for FinanceDatabase data. Uses table name whitelisting to prevent SQL injection.
+- **FQUtils.pm**: Shared utilities - JSON response builders, `jsonrpc_response`/`jsonrpc_error`, OpenAPI spec generator, `sanitize_input()`, and the single `$VERSION` constant.
 
 ## Important Gotchas
 
@@ -55,15 +71,15 @@ $ENV{'FQ_CURRENCY'} = 'EUR';
 my $quoter = Finance::Quote->new();
 ```
 
-### 2. Finance::Quote Uses `$;/` Subscript Separator
+### 2. Finance::Quote Uses `$;` Subscript Separator
 
-The module uses `$;/` (chr(28), NOT chr(3)) as a delimiter in hash keys:
+The module uses `$;` (chr(28), NOT chr(3)) as a delimiter in hash keys. **Always use `index()` + `substr()`** to parse these keys - never `split()` which can have encoding issues:
 
 ```perl
 # Returns keys like: "AAPL\x1Chigh", "AAPL\x1Cclose", etc.
 my %quotes = $quoter->fetch('YahooJSON', 'AAPL', 'MSFT');
 
-# To iterate - use index() not split() to avoid encoding issues:
+# CORRECT - use index() not split():
 foreach my $key (keys %quotes) {
     my $sep = $;;  # chr(28)
     my $pos = index($key, $sep);
@@ -80,6 +96,7 @@ foreach my $key (keys %quotes) {
 - **Must implement both POST and GET** for `/mcp` endpoint (GET for SSE fallback)
 - **Use `/mcp/sse` for explicit SSE endpoint**
 - **Use standard JSON-RPC 2.0** - responses must have `jsonrpc`, `id`, `result`/`error`
+- **Use `FQUtils::jsonrpc_response()` and `FQUtils::jsonrpc_error()`** - these produce correct JSON via `encode_json()`, not string concatenation
 
 ### 4. Cache Returns Full PSGI Response Array
 
@@ -89,60 +106,57 @@ my $cached = FQCache::get($key);
 return $cached if $cached;  # Returns array ref!
 
 # To extract JSON from cached response:
-my $body = $cached->[2][0];  # body is array ref
+my $body = $cached->[2][0];  # body is array of strings
 my $parsed = decode_json($body);
 ```
 
 ### 5. Currency Conversion Is Tricky
 
-Multiple fallback strategies required:
+Multiple fallback strategies are implemented in `_fetch_currency_data()`:
 
 ```perl
 # 1. Try AlphaVantage first (needs API key)
-# 2. Try Yahoo (fetch "USDUSD" style pair)
+# 2. Try Yahoo (fetch "FROMUSD" style pair)
 # 3. Try Finance::Quote::Currencies module
 ```
 
-### 6. Python FinanceDatabase module is udated daily via cron in container
+Both REST handler (`handle_currency`) and MCP tool (`get_currency`) call the same `_fetch_currency_data()` to avoid logic duplication.
 
-See /cron-scripts/ for the scripts, financequote.cron is the cron installed at the container during docker build.
-Script update-financedatabase update the FinanceDatabse python module at around midnight.
-At a later stage (2 hours later) the sqlite3 db located at /tmp/finance_database.db in the container is refreshed, see import_financedatabse.py, the db is opened with proper locking for concurrent access.
+### 6. Python FinanceDatabase module is updated daily via cron in container
+
+See `/cron-scripts/` for the scripts. `financequote.cron` is installed in the container during docker build.
+- `update-financedatabase` updates the FinanceDatabase python module at around midnight
+- 2 hours later, `import_financedatabase.py` refreshes the SQLite DB at `/tmp/finance_database.db` with proper file locking for concurrent access
 
 ### 7. Methods Are Case Insensitive
 
-Use `_normalize_method()` to handle lowercase aliases (e.g., `yahoojson` → `YahooJSON`).
+The `%METHOD_MAP` hash (built once at startup in `app.psgi`) maps lowercase names to their canonical forms (e.g., `yahoojson` → `YahooJSON`). Use `_normalize_method()` for lookups.
 
-## OpenAPI Auto-Generation
+### 8. FQDB Table Names Are Whitelisted
 
-The API includes an auto-generated OpenAPI spec at `/api/v1/spec` (JSON).
+FQDB uses a `%VALID_TABLES` whitelist. Any table name not in the whitelist is rejected. When adding new database tables, you must add them to `%VALID_TABLES` in FQDB.pm.
 
-To add new endpoints to the spec:
+### 9. VERSION Is Centralized
 
-```perl
-FQUtils::register_route('/api/v1/newfeature/{id}', 'get', {
-    summary => 'Get Feature',
-    description => 'Get a specific feature by ID',
-    params => [
-        { name => 'id', in => 'path', required => 1, type => 'string', description => 'Feature ID' },
-    ],
-    responses => { '200' => { description => 'Feature data' } },
-});
-```
+The API version lives in `$FQUtils::VERSION`. All handlers (health, MCP initialize, OpenAPI spec) reference this single constant. Never hardcode version strings.
+
+### 10. Auth Exempts Public Paths
+
+FQRouter exempts `/api/v1/health` and static asset paths from API key authentication. This allows health checks from load balancers and Kubernetes probes without credentials.
 
 ## Adding New Endpoints
 
 ### Pattern for REST API
 
 ```perl
-# 1. Add handler function in FQAPI package
+# 1. Add handler function in FQAPI package (app.psgi)
 sub handle_newfeature {
     my ($param, $params) = @_;
-    # ... logic
+    # ... business logic
     return json_response('success', $data);
 }
 
-# 2. Register route for OpenAPI spec (optional but recommended)
+# 2. Register route for OpenAPI spec (optional but recommended, in app.psgi)
 FQUtils::register_route('/api/v1/newfeature/{id}', 'get', {
     summary => 'Get Feature',
     description => 'Get a specific feature by ID',
@@ -152,7 +166,7 @@ FQUtils::register_route('/api/v1/newfeature/{id}', 'get', {
     responses => { '200' => { description => 'Feature data' } },
 });
 
-# 3. Add route in Plack builder
+# 3. Add route in FQRouter.pm dispatch()
 if ($path =~ m{^/api/v1/newfeature/([^/]+)$}) {
     return FQAPI::handle_newfeature($1, \%params);
 }
@@ -161,7 +175,7 @@ if ($path =~ m{^/api/v1/newfeature/([^/]+)$}) {
 ### Pattern for MCP Tool
 
 ```perl
-# 1. Add tool definition in tools/list response
+# 1. Add tool definition in _mcp_tool_definitions() (app.psgi)
 {
     name => 'my_tool',
     description => 'What it does',
@@ -174,13 +188,22 @@ if ($path =~ m{^/api/v1/newfeature/([^/]+)$}) {
     },
 }
 
-# 2. Add handler in tools/call
+# 2. Add handler in _handle_mcp_tool_call() (app.psgi)
 if ($tool_name eq 'my_tool') {
     my $arg = $tool_args->{param1};
-    # ... logic
+    # ... logic (reuse _fetch_*_data() functions where possible)
     return jsonrpc_response($id, { content => [{ type => 'text', text => encode_json($result) }] });
 }
 ```
+
+### Shared Logic Between REST and MCP
+
+Core data-fetching functions are shared to avoid duplication:
+- `_fetch_quotes_data($method, @symbols)` - fetches and structures quote data
+- `_fetch_info_data($method, @symbols)` - fetches detailed symbol info
+- `_fetch_currency_data($from, $to)` - handles currency conversion with fallbacks
+
+Both REST handlers and MCP tool handlers call these same functions.
 
 ## Environment Variables
 
@@ -189,46 +212,48 @@ if ($tool_name eq 'my_tool') {
 | `FQ_CURRENCY` | Default currency for quotes (e.g., EUR) | Yes |
 | `FQ_CACHE_TTL` | Cache duration in seconds (default: 900) | No |
 | `FQ_CACHE_ENABLED` | 1 or 0 to enable/disable cache | No |
+| `FQ_CACHE_MAX_ENTRIES` | Max cache entries before LRU eviction (default: 10000) | No |
 | `API_AUTH_KEYS` | Comma-separated API keys for auth | No |
 | `ALPHAVANTAGE_API_KEY` | AlphaVantage API key (for premium data) | No |
-| Other `*_API_KEY` vars | Various provider keys | No |
+| Other `*_API_KEY` vars | Various provider keys (configured via `%API_KEY_MODULES` loop) | No |
 
 ## Testing and Developing Locally
 
-Local Containers runs at port 3002, app runs on port 3000 inside. 
-The developemnt container has mounted as a volume the projects /app folder. Any editing in the app folder does not need rebuild (unless you add modules), if editing the app.psgi a restart is required (make restartlocal) for the changes to work. 
-Everytime the container starts it populates the sqlite db, it takes a couple of seconds to be regenerated.
-Editing /cron-scripts needs make rebuildlocal.
-
+Local container runs at port 3002, app runs on port 3000 inside.
+The development container mounts the project's `/app` folder as a volume. Any editing in the app folder does not need a rebuild (unless you add modules). If editing `app.psgi`, a restart is required (`make restartlocal`).
+Every time the container starts it populates the SQLite DB; it takes a couple of seconds to regenerate.
+Editing `/cron-scripts` needs `make rebuildlocal`.
 
 ```bash
 # Use make in project root to see all options
-	make # see help
-	make buildlocal    # Build Local Docker image
-	make uplocal       # Start development environment
-	make uplocalnotdetached # Start development environment with not detached console
-	make downlocal     # Stop local container
-	make restartlocal  # Restart local container (needed if editing psgi)
-	make logslocal     # View local container logs
-	make healthlocal   # Check local container API health
-	make cleanlocal   # Stops and removes local container
-	make testlocal    # Test local API endpoint (/api/v1/methods)
-	make testlocalmethods:  # Test local API endpoint (/api/v1/methods)
-	make testlocalquote:    # Test local API endpoint (/api/v1/quote)
-	make testlocalinfo:     # Test local API endpoint (/api/v1/info)
-	make testlocalcurrency: # Test local API endpoint (/api/v1/currency)
-	make testlocalmcp:      # Test local API endpoint (/mcp)
-	make testlocalspec:    # Test OpenAPI spec endpoint (/api/v1/spec)
-
+make                        # Show help
+make buildlocal             # Build Local Docker image
+make uplocal                # Start development environment (detached)
+make uplocalnotdetached     # Start development environment (foreground, logs visible)
+make downlocal              # Stop local container
+make restartlocal           # Restart local container (needed if editing psgi)
+make logslocal              # View local container logs
+make healthlocal            # Check local container API health
+make cleanlocal             # Stops and removes local container
+make testlocal              # Run all local API tests
+make testlocalmethods       # Test /api/v1/methods
+make testlocalquote         # Test /api/v1/quote
+make testlocalinfo          # Test /api/v1/info
+make testlocalcurrency      # Test /api/v1/currency
+make testlocalmcp           # Test /mcp
+make testlocalspec          # Test /api/v1/spec
 ```
 
 ## Common Pitfalls
 
-1. **Forgetting to cache** - Always cache expensive operations
-2. **Not handling failures** - Check `$result{$sym}` exists before processing
-3. **Hardcoding ports** - Container exposes 3001, app runs on 3000 inside
-4. **Missing CORS headers** - Always add `Access-Control-Allow-Origin: *`
+1. **Forgetting to cache** - Always cache expensive operations using `FQCache::set($key, $response, $ttl)`
+2. **Not handling failures** - Check `$result{$sym}` exists before processing Finance::Quote results
+3. **Hardcoding ports** - Container exposes 3002 locally, app runs on 3000 inside
+4. **Missing CORS headers** - FQRouter handles CORS globally; don't add custom CORS in handlers
 5. **Perl strict mode** - Declare all variables with `my`, use `use strict; use warnings;`
+6. **Duplicating logic** - Use shared `_fetch_*_data()` functions; never re-implement quote/currency fetching in MCP handlers
+7. **SQL injection** - Never interpolate user input into SQL. FQDB validates table names; use parameterized queries for values
+8. **Hardcoding version** - Always use `$FQUtils::VERSION`, never literal version strings
 
 ## Client Libraries
 

@@ -4,6 +4,9 @@ use strict;
 use warnings;
 use JSON::XS qw(encode_json);
 
+# API version - single source of truth
+our $VERSION = '1.69';
+
 sub get_timestamp {
     my ($sec,$min,$hour,$mday,$mon,$year) = gmtime(time());
     $mon += 1;
@@ -26,7 +29,7 @@ sub process_quote_results {
     my %result;
     foreach my $sym (@$syms) {
         foreach my $key (keys %$quotes) {
-            # Manual split instead of regex to avoid issues
+            # Use index() not split() to avoid encoding issues with $;
             my $pos = index($key, $sep);
             next if $pos < 0;
             my $s = substr($key, 0, $pos);
@@ -87,20 +90,40 @@ sub error_response {
 
 sub jsonrpc_response {
     my ($id, $result) = @_;
-    my $json_text = '{"jsonrpc":"2.0","id":' . (defined $id ? $id : 'null') . ',"result":' . encode_json($result) . '}';
-    return [ 200, standard_headers(), [ $json_text ] ];
+    my $resp = {
+        jsonrpc => '2.0',
+        id      => $id,
+        result  => $result,
+    };
+    return [ 200, standard_headers(), [ encode_json($resp) ] ];
 }
 
 sub jsonrpc_error {
     my ($id, $code, $message, $data) = @_;
-    my $json_text = '{"jsonrpc":"2.0","id":' . (defined $id ? $id : 'null') . ',"error":{"code":' . $code . ',"message":"' . $message . '","data":"' . ($data // '') . '"}}';
-    return [ 200, standard_headers(), [ $json_text ] ];
+    my $resp = {
+        jsonrpc => '2.0',
+        id      => $id,
+        error   => {
+            code    => $code,
+            message => $message,
+            (defined $data ? (data => $data) : ()),
+        },
+    };
+    return [ 200, standard_headers(), [ encode_json($resp) ] ];
 }
 
 sub json_error_response {
     my ($code, $message, $data) = @_;
-    my $json_text = '{"jsonrpc":"2.0","id":null,"error":{"code":' . $code . ',"message":"' . $message . '","data":"' . ($data // '') . '"}}';
-    return [ 200, standard_headers(), [ $json_text ] ];
+    my $resp = {
+        jsonrpc => '2.0',
+        id      => undef,
+        error   => {
+            code    => $code,
+            message => $message,
+            (defined $data ? (data => $data) : ()),
+        },
+    };
+    return [ 200, standard_headers(), [ encode_json($resp) ] ];
 }
 
 # ============================================
@@ -123,7 +146,7 @@ sub register_route {
 
 sub get_openapi_spec {
     my (%opts) = @_;
-    my $version = $opts{version} // '1.0.0';
+    my $version = $opts{version} // $VERSION;
     my $fq_version = $opts{fq_version} // 'unknown';
     
     my %spec = (

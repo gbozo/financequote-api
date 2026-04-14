@@ -48,20 +48,20 @@ def acquire_lock(lock_file, timeout=30):
     start_time = time.time()
     while True:
         try:
-            fd = open(lock_file, 'w')
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return fd
+            lock_fh = open(lock_file, 'w')
+            fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return lock_fh
         except (IOError, OSError):
             if time.time() - start_time > timeout:
                 raise TimeoutError(f"Could not acquire lock after {timeout}s")
             time.sleep(0.5)
 
 
-def release_lock(lock_file):
+def release_lock(lock_fh):
     """Release the lock."""
     try:
-        fcntl.flock(lock_file, fcntl.LOCK_UN)
-        lock_file.close()
+        fcntl.flock(lock_fh, fcntl.LOCK_UN)
+        lock_fh.close()
     except Exception as e:
         logger.warning(f"Error releasing lock: {e}")
 
