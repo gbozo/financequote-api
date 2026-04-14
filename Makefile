@@ -71,22 +71,22 @@ testlocalmethods:
 
 testlocalquote:
 	@echo "Testing quote AAPL:"
-	@curl -s http://localhost:3001/api/v1/quote/AAPL | head -20
+	@curl -s http://localhost:3002/api/v1/quote/AAPL | head -20
 	@echo
 
 testlocalinfo:
 	@echo "Testing info AAPL:"
-	@curl -s http://localhost:3001/api/v1/info/AAPL | head -20
+	@curl -s http://localhost:3002/api/v1/info/AAPL | head -20
 	@echo
 
 testlocalcurrency:
 	@echo "Testing currency USD -> EUR:"
-	@curl -s http://localhost:3001/api/v1/currency/USD/EUR | head -20
+	@curl -s http://localhost:3002/api/v1/currency/USD/EUR | head -20
 	@echo
 
 testlocalmcp:
 	@echo "Testing mcp:"
-	@curl -s -X POST http://localhost:3001/mcp -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | head -20
+	@curl -s -X POST http://localhost:3002/mcp -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | head -20
 	@echo
 
 build:

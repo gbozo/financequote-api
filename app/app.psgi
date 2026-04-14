@@ -5,328 +5,164 @@
 use strict;
 use warnings;
 use utf8;
+use JSON::XS qw(encode_json decode_json);
 
-# Finance::Quote is now installed via CPAN, no local lib needed
+use lib 'lib';
+use FQCache;
+use FQDB;
+use FQUtils;
 
 use Plack::Builder;
 use Finance::Quote;
 
 # ============================================
-# In-Memory Cache Module
-# ============================================
-
-{
-    package FQCache;
-
-    use strict;
-    use warnings;
-
-    # Cache storage: key => [expires_at, data]
-    my %cache;
-    my $ttl = 900;  # Default 15 minutes
-    my $enabled = 1;
-
-    sub configure {
-        my ($env_ttl, $env_enabled) = @_;
-        $ttl = $env_ttl // 900 if $env_ttl && $env_ttl =~ /^\d+$/;
-        $enabled = $env_enabled // 1;
-    }
-
-    sub get {
-        my ($key) = @_;
-        return undef unless $enabled;
-        my $entry = $cache{$key};
-        return undef unless $entry;
-        my ($expires, $data) = @$entry;
-        if (time > $expires) {
-            delete $cache{$key};
-            return undef;
-        }
-        return $data;
-    }
-
-    sub set {
-        my ($key, $data, $custom_ttl) = @_;
-        return unless $enabled;
-        my $expire_ttl = $custom_ttl || $ttl;
-        $cache{$key} = [ time + $expire_ttl, $data ];
-    }
-
-    sub clear {
-        %cache = ();
-    }
-
-    sub stats {
-        my $now = time;
-        my $count = 0;
-        my $expired = 0;
-        foreach my $key (keys %cache) {
-            my $entry = $cache{$key};
-            if ($entry->[0] > $now) {
-                $count++;
-            } else {
-                $expired++;
-            }
-        }
-        return { enabled => $enabled, ttl => $ttl, entries => $count, expired => $expired };
-    }
-}
-
-# ============================================
-# SQLite Database Lookup Module
-# ============================================
-
-{
-    package FQDB;
-
-    use strict;
-    use warnings;
-    use DBI;
-    use Fcntl qw(:flock);
-    
-    my $db_path = '/tmp/finance_database.db';
-    my $lock_path = '/tmp/finance_database.db.lock';
-    my $dbh;
-    my $lock_fh;
-    
-    sub connect {
-        return $dbh if $dbh;
-        $dbh = DBI->connect("dbi:SQLite:dbname=$db_path", "", "", {
-            PrintError => 0,
-            RaiseError => 0,
-        });
-        if ($dbh) {
-            # Enable WAL mode and busy timeout
-            $dbh->do("PRAGMA journal_mode=WAL");
-            $dbh->do("PRAGMA busy_timeout=30000");
-            $dbh->do("PRAGMA synchronous=NORMAL");
-        }
-        return $dbh;
-    }
-    
-    sub disconnect {
-        $dbh->disconnect if $dbh;
-        $dbh = undef;
-    }
-    
-    # Search by name, symbol, or ISIN (LIKE query)
-    sub search {
-        my ($query, $type, $limit, $opts) = @_;
-        $limit //= 20;
-        $query =~ s/['"]//g;  # Sanitize
-        
-        my $db = FQDB::connect();
-        return [] unless $db;
-        
-        my $primary_only = $opts->{primary_only} // 0;
-        
-        # Primary exchanges for major markets (include these, exclude others as secondary)
-        my @primary_exchanges = ('NMS', 'NAS', 'NYS', 'NYQ', 'NCM', 'LSE', 'HKG', 'JPX', 'ASX', 'NSE', 'TWO', 'KOE', 'KSC', 'SES', 'SET', 'STO', 'CPH', 'HEL', 'OSL', 'VIE', 'AMS', 'PAR', 'MIL', 'FRA', 'MUN', 'DUS', 'BER', 'BRU', 'LIS', 'MAD');
-        
-        my @tables = $type ? ($type) : ('equities', 'etfs', 'funds', 'indices', 'currencies', 'cryptos', 'moneymarkets');
-        my @results;
-        
-        foreach my $table (@tables) {
-            my $where_clause = "WHERE (symbol LIKE ? OR name LIKE ? OR isin LIKE ?)";
-            if ($primary_only) {
-                my $in_list = join(",", map { "'$_'" } @primary_exchanges);
-                $where_clause .= " AND exchange IN ($in_list)";
-            }
-            
-            my $stmt = "SELECT symbol, name, exchange, country, sector, market_cap, isin FROM $table $where_clause LIMIT ?";
-            my $sth = eval { $db->prepare($stmt) };
-            next unless $sth;
-            $sth->execute("%$query%", "%$query%", "%$query%", $limit);
-            
-            while (my $row = $sth->fetchrow_hashref) {
-                $row->{type} = $table;
-                push @results, $row;
-            }
-            $sth->finish;
-            
-            last if scalar(@results) >= $limit;
-        }
-        
-        return \@results;
-    }
-    
-    # Lookup by exact symbol
-    sub lookup_symbol {
-        my ($symbol, $types) = @_;
-        $symbol =~ s/['"]//g;
-        $symbol = uc($symbol);
-        
-        my $db = FQDB::connect();
-        return {} unless $db;
-        
-        my @tables = $types ? @$types : ('equities', 'etfs', 'funds', 'indices', 'currencies', 'cryptos', 'moneymarkets');
-        
-        foreach my $table (@tables) {
-            my $stmt = "SELECT * FROM $table WHERE symbol = ?";
-            my $sth = eval { $db->prepare($stmt) };
-            next unless $sth;
-            $sth->execute($symbol);
-            
-            if (my $row = $sth->fetchrow_hashref) {
-                $sth->finish;
-                $row->{type} = $table;
-                return $row;
-            }
-            $sth->finish;
-        }
-        
-        return undef;
-    }
-    
-    # Filter by multiple criteria
-    sub filter {
-        my (%opts) = @_;
-        
-        my $db = FQDB::connect();
-        return [] unless $db;
-        
-        my $type = $opts{type} // 'equities';
-        my $sector = $opts{sector};
-        my $country = $opts{country};
-        my $exchange = $opts{exchange};
-        my $market_cap = $opts{market_cap};
-        my $industry = $opts{industry};
-        my $limit = $opts{limit} // 100;
-        
-        my @conditions;
-        my @params;
-        
-        push @conditions, "sector = ?" and push @params, $sector if $sector;
-        push @conditions, "country = ?" and push @params, $country if $country;
-        push @conditions, "exchange = ?" and push @params, $exchange if $exchange;
-        push @conditions, "market_cap = ?" and push @params, $market_cap if $market_cap;
-        push @conditions, "industry LIKE ?" and push @params, "%$industry%" if $industry;
-        
-        my $where = @conditions ? "WHERE " . join(" AND ", @conditions) : "";
-        
-        my $stmt = "SELECT symbol, name, exchange, country, sector, industry, market_cap FROM $type $where LIMIT ?";
-        push @params, $limit;
-        
-        my $sth = eval { $db->prepare($stmt) };
-        return [] unless $sth;
-        $sth->execute(@params);
-        
-        my @results;
-        while (my $row = $sth->fetchrow_hashref) {
-            push @results, $row;
-        }
-        $sth->finish;
-        
-        return \@results;
-    }
-    
-    # Get available filter options
-    sub get_filter_options {
-        my ($type) = @_;
-        $type //= 'equities';
-        
-        my $db = FQDB::connect();
-        return {} unless $db;
-        
-        my %options;
-        
-        # Sectors
-        my $sth = eval { $db->prepare("SELECT DISTINCT sector FROM $type WHERE sector IS NOT NULL ORDER BY sector") };
-        return {} unless $sth;
-        $sth->execute();
-        $options{sectors} = [];
-        while (my $row = $sth->fetch()) {
-            push @{$options{sectors}}, $row->[0] if $row->[0];
-        }
-        $sth->finish;
-        
-        # Countries
-        $sth = eval { $db->prepare("SELECT DISTINCT country FROM $type WHERE country IS NOT NULL ORDER BY country") };
-        if ($sth) {
-            $sth->execute();
-            $options{countries} = [];
-            while (my $row = $sth->fetch()) {
-                push @{$options{countries}}, $row->[0] if $row->[0];
-            }
-            $sth->finish;
-        }
-        
-        # Exchanges
-        $sth = eval { $db->prepare("SELECT DISTINCT exchange FROM $type WHERE exchange IS NOT NULL ORDER BY exchange") };
-        if ($sth) {
-            $sth->execute();
-            $options{exchanges} = [];
-            while (my $row = $sth->fetch()) {
-                push @{$options{exchanges}}, $row->[0] if $row->[0];
-            }
-            $sth->finish;
-        }
-        
-        # Market caps
-        $sth = eval { $db->prepare("SELECT DISTINCT market_cap FROM $type WHERE market_cap IS NOT NULL ORDER BY market_cap") };
-        if ($sth) {
-            $sth->execute();
-            $options{market_caps} = [];
-            while (my $row = $sth->fetch()) {
-                push @{$options{market_caps}}, $row->[0] if $row->[0];
-            }
-            $sth->finish;
-        }
-        
-        return \%options;
-    }
-    
-    # Get database statistics
-    sub stats {
-        my $db = FQDB::connect();
-        return { error => "Database not available", status => "offline" } unless $db;
-        
-        my %stats;
-        
-        my @tables = ('equities', 'etfs', 'funds', 'indices', 'currencies', 'cryptos', 'moneymarkets');
-        
-        foreach my $table (@tables) {
-            my $sth = eval { $db->prepare("SELECT COUNT(*) FROM $table") };
-            next unless $sth;
-            $sth->execute();
-            my $row = $sth->fetch();
-            $stats{$table} = $row ? $row->[0] : 0;
-            $sth->finish;
-        }
-        
-        $stats{total} = 0;
-        $stats{total} += $_ for values %stats;
-        
-        return \%stats;
-    }
-    
-    # Get all asset types
-    sub asset_types {
-        return [
-            { name => 'equities', description => 'Stock equities from global markets' },
-            { name => 'etfs', description => 'Exchange-traded funds' },
-            { name => 'funds', description => 'Mutual funds and investment funds' },
-            { name => 'indices', description => 'Market indices' },
-            { name => 'currencies', description => 'Currency pairs' },
-            { name => 'cryptos', description => 'Cryptocurrencies' },
-            { name => 'moneymarkets', description => 'Money market instruments' },
-        ];
-    }
-}
-
-# ============================================
 # API Application
-# ============================================
+# ====================================
 
 {
     package FQAPI;
 
     use strict;
     use warnings;
-    use JSON::XS qw(encode_json decode_json);
+
+    # Import utility functions
+    sub get_timestamp { FQUtils::get_timestamp() }
+    sub standard_headers { FQUtils::standard_headers() }
+    sub build_cache_key { FQUtils::build_cache_key(@_) }
+    sub process_quote_results { FQUtils::process_quote_results(@_) }
+    sub url_decode { FQUtils::url_decode(@_) }
+    sub json_response { FQUtils::json_response(@_) }
+    sub error_response { FQUtils::error_response(@_) }
+    sub jsonrpc_response { FQUtils::jsonrpc_response(@_) }
+    sub jsonrpc_error { FQUtils::jsonrpc_error(@_) }
+    sub json_error_response { FQUtils::json_error_response(@_) }
+    sub decode_json { JSON::XS::decode_json(@_) }
+
+    # Normalize method names (handle case-insensitive input)
+    sub _normalize_method {
+        my ($method) = @_;
+        my @methods = @Finance::Quote::MODULES;
+        my %method_map;
+        $method_map{lc($_)} = $_ for @methods;
+        return $method_map{lc($method)} // $method;
+    }
+
+    # Register API routes for OpenAPI spec generation
+    FQUtils::register_route('/api/v1/health', 'get', {
+        summary => 'Health Check',
+        description => 'Returns API health status and cache statistics',
+        responses => { '200' => { description => 'OK' } },
+    });
+    FQUtils::register_route('/api/v1/methods', 'get', {
+        summary => 'List Available Methods',
+        description => 'Returns list of available Finance::Quote fetch methods',
+        responses => { '200' => { description => 'OK' } },
+    });
+    FQUtils::register_route('/api/v1/quote/{symbols}', 'get', {
+        summary => 'Fetch Quotes',
+        description => 'Fetch stock quotes for given symbols',
+        params => [
+            { name => 'symbols', in => 'path', required => 1, type => 'string', description => 'Comma-separated symbols' },
+            { name => 'method', in => 'query', type => 'string', description => 'Quote method (default: yahooJSON)' },
+            { name => 'currency', in => 'query', type => 'string', description => 'Desired currency (e.g., EUR)' },
+        ],
+        responses => { '200' => { description => 'Quote data' } },
+    });
+    FQUtils::register_route('/api/v1/info/{symbol}', 'get', {
+        summary => 'Get Symbol Info',
+        description => 'Get detailed metadata about a stock symbol',
+        params => [
+            { name => 'symbol', in => 'path', required => 1, type => 'string', description => 'Stock symbol' },
+            { name => 'method', in => 'query', type => 'string', description => 'Quote method' },
+        ],
+        responses => { '200' => { description => 'Symbol metadata' } },
+    });
+    FQUtils::register_route('/api/v1/currency/{from}/{to}', 'get', {
+        summary => 'Currency Conversion',
+        description => 'Get exchange rate between two currencies',
+        params => [
+            { name => 'from', in => 'path', required => 1, type => 'string', description => 'Source currency' },
+            { name => 'to', in => 'path', required => 1, type => 'string', description => 'Target currency' },
+        ],
+        responses => { '200' => { description => 'Exchange rate' } },
+    });
+    FQUtils::register_route('/api/v1/fetch/{method}/{symbols}', 'get', {
+        summary => 'Direct Fetch',
+        description => 'Fetch quotes using a specific method',
+        params => [
+            { name => 'method', in => 'path', required => 1, type => 'string', description => 'FQ method name' },
+            { name => 'symbols', in => 'path', required => 1, type => 'string', description => 'Symbols' },
+        ],
+        responses => { '200' => { description => 'Quote data' } },
+    });
+    FQUtils::register_route('/api/v1/db/stats', 'get', {
+        summary => 'Database Statistics',
+        description => 'Get row counts for each asset type table',
+        responses => { '200' => { description => 'Statistics' } },
+    });
+    FQUtils::register_route('/api/v1/db/assets', 'get', {
+        summary => 'List Asset Types',
+        description => 'Get list of available asset types',
+        responses => { '200' => { description => 'Asset types' } },
+    });
+    FQUtils::register_route('/api/v1/db/options/{type}', 'get', {
+        summary => 'Filter Options',
+        description => 'Get available filter options for an asset type',
+        params => [
+            { name => 'type', in => 'path', required => 1, type => 'string', description => 'Asset type' },
+        ],
+        responses => { '200' => { description => 'Filter options' } },
+    });
+    FQUtils::register_route('/api/v1/search', 'get', {
+        summary => 'Search Assets',
+        description => 'Search financial assets by name, symbol, or ISIN',
+        params => [
+            { name => 'q', in => 'query', required => 1, type => 'string', description => 'Search query' },
+            { name => 'type', in => 'query', type => 'string', description => 'Asset type filter' },
+            { name => 'limit', in => 'query', type => 'integer', description => 'Max results' },
+            { name => 'primary', in => 'query', type => 'boolean', description => 'Primary exchanges only' },
+        ],
+        responses => { '200' => { description => 'Search results' } },
+    });
+    FQUtils::register_route('/api/v1/lookup/{symbol}', 'get', {
+        summary => 'Lookup Symbol',
+        description => 'Lookup exact symbol details from database',
+        params => [
+            { name => 'symbol', in => 'path', required => 1, type => 'string', description => 'Symbol' },
+        ],
+        responses => { '200' => { description => 'Symbol data' } },
+    });
+    FQUtils::register_route('/api/v1/filter', 'get', {
+        summary => 'Filter Assets',
+        description => 'Filter assets by criteria (sector, country, exchange, etc.)',
+        params => [
+            { name => 'type', in => 'query', required => 1, type => 'string', description => 'Asset type' },
+            { name => 'sector', in => 'query', type => 'string' },
+            { name => 'country', in => 'query', type => 'string' },
+            { name => 'exchange', in => 'query', type => 'string' },
+            { name => 'market_cap', in => 'query', type => 'string' },
+            { name => 'limit', in => 'query', type => 'integer' },
+        ],
+        responses => { '200' => { description => 'Filtered results' } },
+    });
+    FQUtils::register_route('/mcp', 'post', {
+        summary => 'MCP Endpoint',
+        description => 'Model Context Protocol JSON-RPC 2.0 endpoint',
+        responses => { '200' => { description => 'JSON-RPC response' } },
+    });
+    FQUtils::register_route('/mcp', 'get', {
+        summary => 'MCP SSE Endpoint',
+        description => 'MCP Server-Sent Events fallback',
+        responses => { '200' => { description => 'SSE stream' } },
+    });
+    FQUtils::register_route('/mcp/sse', 'get', {
+        summary => 'MCP SSE Endpoint',
+        description => 'MCP Server-Sent Events endpoint',
+        responses => { '200' => { description => 'SSE stream' } },
+    });
 
     # Read cache configuration from environment
-    my $FQ_CACHE_TTL = $ENV{'FQ_CACHE_TTL'} // 900;  # Default 15 minutes
+    my $FQ_CACHE_TTL = $ENV{'FQ_CACHE_TTL'} // 900;
     my $FQ_CACHE_ENABLED = $ENV{'FQ_CACHE_ENABLED'} // 1;
     FQCache::configure($FQ_CACHE_TTL, $FQ_CACHE_ENABLED);
 
@@ -375,47 +211,6 @@ use Finance::Quote;
     
     my $quoter = Finance::Quote->new(@quoter_args);
 
-    # Get current timestamp in ISO format
-    sub get_timestamp {
-        my ($sec,$min,$hour,$mday,$mon,$year) = gmtime(time());
-        $mon += 1;
-        $year += 1900;
-        return sprintf("%04d-%02d-%02dT%02d:%02d:%02dZ", $year, $mon, $mday, $hour, $min, $sec);
-    }
-
-    # ----- Helper: Build JSON response -----
-    sub json_response {
-        my $status = shift;
-        my $data = shift;
-        my $code = shift // 200;
-        
-        my $ts = get_timestamp();
-        my $json_text = '{';
-        my @pairs;
-        push @pairs, '"status":"' . $status . '"';
-        push @pairs, '"data":' . encode_json($data);
-        push @pairs, '"timestamp":"' . $ts . '"';
-        $json_text .= join(',', @pairs) . '}';
-        
-        return [ $code, [ 'Content-Type' => 'application/json', 'Access-Control-Allow-Origin' => '*' ], [ $json_text ] ];
-    }
-
-    sub error_response {
-        my $code = shift;
-        my $message = shift;
-        my $details = shift // '';
-        
-        my $ts = get_timestamp();
-        my $json_text = '{';
-        my @pairs;
-        push @pairs, '"status":"error"';
-        push @pairs, '"error":' . encode_json({ code => $code, message => $message, details => $details });
-        push @pairs, '"timestamp":"' . $ts . '"';
-        $json_text .= join(',', @pairs) . '}';
-        
-        return [ $code, [ 'Content-Type' => 'application/json', 'Access-Control-Allow-Origin' => '*' ], [ $json_text ] ];
-    }
-
     # ----- Routes -----
 
     # 1. Health Check
@@ -439,9 +234,10 @@ use Finance::Quote;
         my ($symbols, $params) = @_;
         
         # Build cache key
-        my $method = $params->{method} || 'yahooJSON';
+        my $method = $params->{method} || 'YahooJSON';
+        $method = _normalize_method($method);
         my $currency = $params->{currency} || '';
-        my $cache_key = "quote:${symbols}:${method}:${currency}";
+        my $cache_key = build_cache_key('quote', $symbols, $method, $currency);
         
         # Check cache
         my $cached = FQCache::get($cache_key);
@@ -456,26 +252,9 @@ use Finance::Quote;
         my %quotes = $quoter->fetch($method, @syms);
         
         # Process and normalize results
-        my %result;
-        foreach my $sym (@syms) {
-            my $exists = 0;
-            foreach my $key (keys %quotes) {
-                my ($s, $attr) = split(/$;/, $key, 2);
-                next unless $s eq $sym;
-                $exists = 1;
-                $result{$sym}{$attr} = $quotes{$key};
-            }
-            # If no data at all, mark as failed
-            unless ($result{$sym}) {
-                $result{$sym} = {
-                    symbol => $sym,
-                    success => 0,
-                    errormsg => 'No data returned for symbol',
-                };
-            }
-        }
+        my $result = process_quote_results(\%quotes, \@syms);
         
-        my $response = json_response('success', \%result);
+        my $response = json_response('success', $result);
         FQCache::set($cache_key, $response);
         return $response;
     }
@@ -485,8 +264,9 @@ use Finance::Quote;
         my ($symbol, $params) = @_;
         
         # Build cache key
-        my $method = $params->{method} || 'yahooJSON';
-        my $cache_key = "info:${symbol}:${method}";
+        my $method = $params->{method} || 'YahooJSON';
+        $method = _normalize_method($method);
+        my $cache_key = build_cache_key('info', $symbol, $method);
         
         # Check cache
         my $cached = FQCache::get($cache_key);
@@ -529,7 +309,7 @@ use Finance::Quote;
         my ($from, $to, $params) = @_;
         
         # Build cache key
-        my $cache_key = "currency:${from}:${to}";
+        my $cache_key = build_cache_key('currency', $from, $to);
         
         # Check cache
         my $cached = FQCache::get($cache_key);
@@ -611,17 +391,18 @@ use Finance::Quote;
     sub handle_fetch {
         my ($method, $symbols, $params) = @_;
         
-        # Validate method
-        my @methods = @{ $Finance::Quote::MODULES };
+        # Validate and normalize method
+        $method = _normalize_method($method);
+        my @methods = @Finance::Quote::MODULES;
         my %method_map;
         @method_map{@methods} = ();
         
-        unless (exists $method_map{lc($method)}) {
+        unless (exists $method_map{$method}) {
             return error_response(400, "Unknown method: $method", "Use /api/v1/methods to see available methods");
         }
         
         # Build cache key
-        my $cache_key = "fetch:${method}:${symbols}";
+        my $cache_key = build_cache_key('fetch', $method, $symbols);
         
         # Check cache
         my $cached = FQCache::get($cache_key);
@@ -631,16 +412,9 @@ use Finance::Quote;
         my %quotes = $quoter->fetch($method, @syms);
         
         # Process results
-        my %result;
-        foreach my $sym (@syms) {
-            foreach my $key (keys %quotes) {
-                my ($s, $attr) = split(/$;/, $key, 2);
-                next unless $s eq $sym;
-                $result{$sym}{$attr} = $quotes{$key};
-            }
-        }
+        my $result = process_quote_results(\%quotes, \@syms);
         
-        my $response = json_response('success', \%result);
+        my $response = json_response('success', $result);
         FQCache::set($cache_key, $response);
         return $response;
     }
@@ -654,7 +428,7 @@ use Finance::Quote;
         
         # Parse JSON-RPC 2.0 request
         my $req;
-        eval { $req = decode_json($body); };
+        eval { $req = JSON::XS::decode_json($body); };
         if ($@ || !$req) {
             return json_error_response(-32700, "Parse error", "Invalid JSON");
         }
@@ -999,72 +773,6 @@ use Finance::Quote;
         }
         return $cached;
     }
-    
-    sub _get_currency_rate {
-        my ($from, $to) = @_;
-        
-        if ($ALPHAVANTAGE_API_KEY) {
-            my @pairs = ("$from$to");
-            my %quotes = $quoter->fetch('alphavantage', @pairs);
-            my $rate;
-            foreach my $k (keys %quotes) {
-                my $v = $quotes{$k};
-                if (ref($v) eq 'HASH') {
-                    $rate = $v->{close} || $v->{last} || $v->{rate};
-                } elsif (!ref($v) && $v =~ /^-?[\d.]+$/) {
-                    $rate = $v;
-                }
-                last if $rate;
-            }
-            return $rate + 0 if $rate && $rate =~ /^-?[\d.]+$/;
-        }
-        
-        my @pairs = ("$from$to");
-        my %quotes = $quoter->fetch('yahooJSON', @pairs);
-        my $rate;
-        foreach my $k (keys %quotes) {
-            my $v = $quotes{$k};
-            if (ref($v) eq 'HASH' && $v->{success}) {
-                $rate = $v->{close} || $v->{last};
-                last if $rate;
-            } elsif (!ref($v) && $v =~ /^-?[\d.]+$/) {
-                $rate = $v;
-                last if $rate;
-            }
-        }
-        
-        unless ($rate) {
-            %quotes = $quoter->fetch('Currencies', @pairs);
-            my $key = "${from}${to}";
-            my $v = $quotes{$key};
-            if (ref($v) eq 'HASH') {
-                $rate = $v->{last} || $v->{rate};
-            } elsif (!ref($v) && $v =~ /^-?[\d.]+$/) {
-                $rate = $v;
-            }
-        }
-        
-        return $rate + 0 if $rate && $rate =~ /^-?[\d.]+$/;
-        return undef;
-    }
-    
-    sub jsonrpc_response {
-        my ($id, $result) = @_;
-        my $json_text = '{"jsonrpc":"2.0","id":' . (defined $id ? $id : 'null') . ',"result":' . encode_json($result) . '}';
-        return [ 200, [ 'Content-Type' => 'application/json', 'Access-Control-Allow-Origin' => '*' ], [ $json_text ] ];
-    }
-    
-    sub jsonrpc_error {
-        my ($id, $code, $message, $data) = @_;
-        my $json_text = '{"jsonrpc":"2.0","id":' . (defined $id ? $id : 'null') . ',"error":{"code":' . $code . ',"message":"' . $message . '","data":"' . ($data // '') . '"}}';
-        return [ 200, [ 'Content-Type' => 'application/json', 'Access-Control-Allow-Origin' => '*' ], [ $json_text ] ];
-    }
-    
-    sub json_error_response {
-        my ($code, $message, $data) = @_;
-        my $json_text = '{"jsonrpc":"2.0","id":null,"error":{"code":' . $code . ',"message":"' . $message . '","data":"' . ($data // '') . '"}}';
-        return [ 200, [ 'Content-Type' => 'application/json', 'Access-Control-Allow-Origin' => '*' ], [ $json_text ] ];
-    }
 }
 
 # ============================================
@@ -1079,7 +787,7 @@ sub {
     my %params;
     foreach my $p (@params) {
         my ($k, $v) = split(/=/, $p, 2);
-        $params{$k} = $v if $k;
+        $params{FQAPI::url_decode($k)} = FQAPI::url_decode($v) if $k;
     }
     
     # CORS preflight
@@ -1143,7 +851,7 @@ sub {
     }
     
     # Route: /api/v1/fetch/:method/:symbols
-    if ($path eq '/api/v1/fetch/([^/]+)/([^/]+)$') {
+    if ($path =~ m{^/api/v1/fetch/([^/]+)/([^/]+)$}) {
         return FQAPI::handle_fetch($1, $2, \%params);
     }
     
@@ -1226,7 +934,7 @@ sub {
     }
     
     # MCP Protocol endpoint (JSON-RPC 2.0)
-    if ($path eq '/mcp') {
+    if ($path eq '/mcp' || $path eq '/mcp/sse') {
         # Handle POST (Streamable HTTP)
         if ($method eq 'POST') {
             my $content_length = $env->{CONTENT_LENGTH} // 0;
@@ -1261,23 +969,44 @@ sub {
         return [ 200, [ 'Content-Type' => 'text/html', 'Access-Control-Allow-Origin' => '*' ], [ $html ] ];
     }
     
-    # Serve OpenAPI spec with dynamic server URL and version
-    if ($path eq '/openapi.yaml') {
+    # Serve OpenAPI spec (auto-generated from registered routes)
+    if ($path eq '/openapi.yaml' || $path eq '/openapi.json') {
+        my $fq_version = Finance::Quote->VERSION // 'unknown';
+        
+        if ($path eq '/openapi.json') {
+            my $spec = FQUtils::get_openapi_spec(
+                version => '1.69',
+                fq_version => $fq_version,
+            );
+            $spec->{servers}[0]{url} = $env->{'psgi.url_scheme'} . '://' . ($env->{HTTP_HOST} // $env->{SERVER_NAME} // 'localhost:3001');
+            return [ 200, [ 'Content-Type' => 'application/json', 'Access-Control-Allow-Origin' => '*' ], [ encode_json($spec) ] ];
+        }
+        
+        # YAML - use static file with dynamic replacements
         open my $fh, '<', '/app/public/openapi.yaml' or return [ 500, [ 'Content-Type' => 'text/plain' ], [ 'Cannot read file' ] ];
         my $yaml = do { local $/; <$fh> };
         close $fh;
         
-        # Replace {SERVER_URL} with actual host from request
         my $host = $env->{HTTP_HOST} // $env->{SERVER_NAME} // 'localhost:3001';
         my $scheme = $env->{'psgi.url_scheme'} // 'http';
         my $server_url = "$scheme://$host";
         $yaml =~ s/\{SERVER_URL\}/$server_url/ge;
-        
-        # Replace {FQ_VERSION} with Finance::Quote version
-        my $fq_version = Finance::Quote->VERSION // 'unknown';
         $yaml =~ s/\{FQ_VERSION\}/$fq_version/ge;
         
         return [ 200, [ 'Content-Type' => 'text/yaml', 'Access-Control-Allow-Origin' => '*' ], [ $yaml ] ];
+    }
+    
+    # Serve OpenAPI spec as JSON (auto-generated)
+    if ($path eq '/api/v1/spec') {
+        my $fq_version = Finance::Quote->VERSION // 'unknown';
+        my $host = $env->{HTTP_HOST} // $env->{SERVER_NAME} // 'localhost:3001';
+        my $scheme = $env->{'psgi.url_scheme'} // 'http';
+        my $spec = FQUtils::get_openapi_spec(
+            version => '1.69',
+            fq_version => $fq_version,
+        );
+        $spec->{servers}[0]{url} = "$scheme://$host";
+        return [ 200, [ 'Content-Type' => 'application/json', 'Access-Control-Allow-Origin' => '*' ], [ encode_json($spec) ] ];
     }
     
     # Serve Swagger UI (redirect to main index)

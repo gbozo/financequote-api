@@ -95,6 +95,16 @@ Multiple fallback strategies required:
 # 3. Try Finance::Quote::Currencies module
 ```
 
+### 6. Python FinanceDatabase module is udated daily via cron in container
+
+See /cron-scripts/ for the scripts, financequote.cron is the cron installed at the container during docker build.
+Script update-financedatabase update the FinanceDatabse python module at around midnight.
+At a later stage (2 hours later) the sqlite3 db located at /tmp/finance_database.db in the container is refreshed, see import_financedatabse.py, the db is opened with proper locking for concurrent access.
+
+### 7. Finance::Quote methods are case sensitive.
+
+period.
+
 ## Adding New Endpoints
 
 ### Pattern for REST API
@@ -148,9 +158,13 @@ if ($tool_name eq 'my_tool') {
 | `ALPHAVANTAGE_API_KEY` | AlphaVantage API key (for premium data) | No |
 | Other `*_API_KEY` vars | Various provider keys | No |
 
-## Testing Locally
+## Testing and Developing Locally
 
-Local Containers runs at port 3002, app runs on port 3000 inside
+Local Containers runs at port 3002, app runs on port 3000 inside. 
+The developemnt container has mounted as a volume the projects /app folder. Any editing in the app folder does not need rebuild (unless you add modules), if editing the app.psgi a restart is required (make restartlocal) for the changes to work. 
+Everytime the container starts it populates the sqlite db, it takes a couple of seconds to be regenerated.
+Editing /cron-scripts needs make rebuildlocal.
+
 
 ```bash
 # Use make in project root to see all options
@@ -204,7 +218,7 @@ git tag v1.x.x
 git push origin main --tags
 
 # 3. Create GitHub release
-gh release create v1.0.x --title "v1.0.x" --generate-notes
+gh release create v1.x.x --title "v1.x.x" --generate-notes
 ```
 
 Docker Hub auto-builds from GitHub releases.
