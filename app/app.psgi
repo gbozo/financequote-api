@@ -9,7 +9,6 @@ use strict;
 use warnings;
 use utf8;
 use JSON::XS qw(encode_json decode_json);
-use Encode qw(encode_utf8);
 
 use lib 'lib';
 use FQCache;
@@ -31,6 +30,7 @@ use Finance::Quote;
 
     use strict;
     use warnings;
+    use Encode qw(encode_utf8);
 
     # Import utility functions
     sub get_timestamp { FQUtils::get_timestamp() }
