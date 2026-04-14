@@ -396,18 +396,22 @@ sub _handle_tool_call {
         my $type = $tool_args->{type} // '';
 
         return _jsonrpc_error($id, -32602, "Invalid params",
-            "type is required. Valid types: equities, etfs, funds, indices, currencies, cryptos, moneymarkets")
+            "type is required. Valid types: equities, etfs, funds, indices, currencies, cryptos, moneymarkets. " .
+            "Each type has different filter columns - use get_filter_options to discover them.")
             unless $type;
 
-        my $results = FQDB::filter(
-            type       => $type,
-            sector     => $tool_args->{sector},
-            country    => $tool_args->{country},
-            exchange   => $tool_args->{exchange},
-            market_cap => $tool_args->{market_cap},
-            industry   => $tool_args->{industry},
-            limit      => $tool_args->{limit} // 100,
+        # Pass all tool_args through to FQDB::filter() which validates per-type
+        my %filter_args = (
+            type  => $type,
+            limit => $tool_args->{limit} // 100,
         );
+        # Forward all filter params dynamically (FQDB validates per-type)
+        for my $key (keys %$tool_args) {
+            next if $key eq 'type' || $key eq 'limit';
+            $filter_args{$key} = $tool_args->{$key};
+        }
+
+        my $results = FQDB::filter(%filter_args);
         return _jsonrpc_response($id, { content => [{ type => 'text', text => encode_json({ results => $results, count => scalar(@$results) }) }] });
     }
 
@@ -518,7 +522,7 @@ sub _tool_definitions {
         # --- Database discovery tools ---
         {
             name => 'search_assets',
-            description => 'Search the financial database by company name, ticker symbol, or ISIN. Searches across all asset types (equities, ETFs, funds, indices, currencies, cryptos). Returns: { results: [{symbol, name, exchange, country, sector, market_cap, isin, type}], count }. Use primary=true to filter to major exchanges only. Example: query="Apple", type="equities"',
+            description => 'Search the financial database by name, ticker, ISIN, or type-specific fields. Searches across all asset types with type-appropriate columns: equities search symbol/name/isin, etfs/funds search symbol/name/category/family, currencies search symbol/name/base_currency/quote_currency, cryptos search symbol/name/cryptocurrency. Returns type-appropriate result fields. Use primary=true for major exchanges only. Example: query="Apple" or query="Bitcoin" type="cryptos"',
             inputSchema => {
                 type => 'object',
                 properties => {
@@ -532,7 +536,7 @@ sub _tool_definitions {
         },
         {
             name => 'lookup_symbol',
-            description => 'Get exact database record for a ticker symbol. Returns all stored fields: symbol, name, exchange, country, sector, industry, market_cap, isin, currency, and more. Returns error if symbol not found - use search_assets to find the correct ticker first.',
+            description => 'Get exact database record for a ticker symbol. Returns all type-specific fields (e.g., equities: sector, country, industry, market_cap, isin; etfs: category_group, category, family; currencies: base_currency, quote_currency; cryptos: cryptocurrency). Returns error if not found - use search_assets first.',
             inputSchema => {
                 type => 'object',
                 properties => {
@@ -543,24 +547,33 @@ sub _tool_definitions {
         },
         {
             name => 'filter_assets',
-            description => 'Filter assets by criteria. Useful for screening stocks by sector, country, exchange, or market cap. Returns: { results: [{symbol, name, exchange, country, sector, industry, market_cap}], count }. Use get_filter_options first to discover valid filter values. Example: type=equities, sector=Technology, country=United States',
+            description => 'Filter assets by type-specific criteria. IMPORTANT: different asset types have different filter columns! Use get_filter_options(type) first to discover valid filters. Filter columns per type: equities: sector, country, exchange, market_cap, industry, industry_group, currency, market. etfs/funds: category_group, category, family, exchange, currency, market. indices: category_group, category, exchange, currency, market. currencies: base_currency, quote_currency, exchange. cryptos: cryptocurrency, currency, exchange. moneymarkets: currency, family. Returns matching assets with type-appropriate fields.',
             inputSchema => {
                 type => 'object',
                 properties => {
-                    type       => { type => 'string',  description => 'Asset type (required): equities, etfs, funds, indices, currencies, cryptos, moneymarkets' },
-                    sector     => { type => 'string',  description => 'Sector filter (e.g., Technology, Healthcare, Financial Services). Use get_filter_options to see valid values.' },
-                    industry   => { type => 'string',  description => 'Industry filter (partial match, e.g., "Software", "Semiconductors")' },
-                    country    => { type => 'string',  description => 'Country filter (e.g., United States, China, Germany)' },
-                    exchange   => { type => 'string',  description => 'Exchange filter (e.g., NMS, NYQ, LSE, HKG)' },
-                    market_cap => { type => 'string',  description => 'Market cap tier: Large Cap, Mid Cap, Small Cap, Mega Cap, Micro Cap, Nano Cap' },
-                    limit      => { type => 'integer', description => 'Max results (default: 100)' },
+                    type           => { type => 'string',  description => 'Asset type (required): equities, etfs, funds, indices, currencies, cryptos, moneymarkets' },
+                    sector         => { type => 'string',  description => '[equities] Sector (e.g., Technology, Healthcare). Use get_filter_options to see valid values.' },
+                    industry       => { type => 'string',  description => '[equities] Industry (partial match, e.g., "Software", "Semiconductors")' },
+                    industry_group => { type => 'string',  description => '[equities] Industry group (e.g., "Semiconductors & Semiconductor Equipment")' },
+                    country        => { type => 'string',  description => '[equities] Country (e.g., United States, China, Germany)' },
+                    exchange       => { type => 'string',  description => '[equities/etfs/funds/indices/currencies/cryptos] Exchange code (e.g., NMS, NYQ, LSE)' },
+                    market         => { type => 'string',  description => '[equities/etfs/funds/indices] Market (e.g., us_market, gb_market)' },
+                    market_cap     => { type => 'string',  description => '[equities] Market cap tier: Large Cap, Mid Cap, Small Cap, Mega Cap, Micro Cap, Nano Cap' },
+                    currency       => { type => 'string',  description => '[equities/etfs/funds/indices/cryptos/moneymarkets] Currency code (e.g., USD, EUR)' },
+                    category_group => { type => 'string',  description => '[etfs/funds/indices] Category group (e.g., "Equity", "Fixed Income")' },
+                    category       => { type => 'string',  description => '[etfs/funds/indices] Category (partial match, e.g., "Large Growth", "Technology")' },
+                    family         => { type => 'string',  description => '[etfs/funds/moneymarkets] Fund family (e.g., "Vanguard", "iShares", "Fidelity")' },
+                    base_currency  => { type => 'string',  description => '[currencies] Base currency code (e.g., USD, EUR, GBP)' },
+                    quote_currency => { type => 'string',  description => '[currencies] Quote currency code (e.g., USD, EUR, JPY)' },
+                    cryptocurrency => { type => 'string',  description => '[cryptos] Cryptocurrency name (e.g., Bitcoin, Ethereum, Solana)' },
+                    limit          => { type => 'integer', description => 'Max results (default: 100)' },
                 },
                 required => ['type'],
             },
         },
         {
             name => 'get_filter_options',
-            description => 'Get available filter values for a given asset type. Returns lists of valid sectors, countries, exchanges, and market_cap tiers. Call this BEFORE filter_assets to know what filter values are valid. Example: type=equities returns { sectors: ["Technology",...], countries: [...], exchanges: [...], market_caps: [...] }',
+            description => 'Get available filter values for a given asset type. CRITICAL: each type has DIFFERENT filters! Call this BEFORE filter_assets. Examples: type=equities returns { sectors, countries, exchanges, market_caps, industries, ... }. type=etfs returns { category_groups, categories, families, exchanges, currencies }. type=currencies returns { base_currencies, quote_currencies, exchanges }. type=cryptos returns { cryptocurrencies, currencies, exchanges }.',
             inputSchema => {
                 type => 'object',
                 properties => {
@@ -570,7 +583,7 @@ sub _tool_definitions {
         },
         {
             name => 'get_asset_types',
-            description => 'List all available asset types in the database with descriptions and row counts. Returns: { types: [{name, description}], stats: {equities: N, etfs: N, ...} }. Call this first to understand what data is available.',
+            description => 'List all available asset types in the database with descriptions, row counts, and available filter columns for each type. Returns: { types: [{name, description, filters: [...]}], stats: {equities: N, etfs: N, ...} }. Call this first to understand what data is available and what filters apply to each type.',
             inputSchema => { type => 'object', properties => {} },
         },
         # --- Utility tools ---
@@ -759,7 +772,7 @@ sub _handle_prompt_get {
                     role    => 'user',
                     content => {
                         type => 'text',
-                        text => "Screen the market for stocks matching: $criteria_text.\n\nSteps:\n1. If no criteria provided, first use get_filter_options for equities to show me available sectors, countries, and market cap tiers, then ask what I'd like to screen for.\n2. Use filter_assets with the criteria to find matching stocks (limit to 10).\n3. For the top 5 results, use get_portfolio to fetch live quotes.\n4. Present a summary table with: symbol, name, sector, price, and market cap.\n\nAll prices are in the server's configured default currency.",
+                        text => "Screen the market for assets matching: $criteria_text.\n\nSteps:\n1. If no criteria provided, first use get_asset_types to see available types, then get_filter_options for the chosen type to show available filter values. IMPORTANT: different asset types have different filters (e.g., equities use sector/country/market_cap, etfs use category_group/category/family, currencies use base_currency/quote_currency).\n2. Use filter_assets with type and the criteria to find matching assets (limit to 10).\n3. For the top 5 results, use get_portfolio to fetch live quotes.\n4. Present a summary table with relevant columns for the asset type.\n\nAll prices are in the server's configured default currency.",
                     },
                 },
             ],

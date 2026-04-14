@@ -59,7 +59,7 @@ Quick reference for agents working on this project.
 - **FQRouter.pm**: All HTTP plumbing - route regex matching, auth checking, CORS headers, static file serving, query string parsing. Developers should rarely need to touch this.
 - **FQMCP.pm**: All MCP (Model Context Protocol) logic - JSON-RPC dispatch, tool definitions/handlers, resource definitions/reader, prompt definitions/handler. Configured at startup with references to shared `_fetch_*_data()` functions from FQAPI.
 - **FQCache.pm**: In-memory key/value cache with configurable TTL, max entry limit, and LRU eviction. Stores full PSGI response arrays.
-- **FQDB.pm**: SQLite interface for FinanceDatabase data. Uses table name whitelisting to prevent SQL injection.
+- **FQDB.pm**: SQLite interface for FinanceDatabase data. Uses table name whitelisting, per-type column schemas, and type-aware queries (search, filter, get_filter_options adapt to each asset type's actual columns).
 - **FQUtils.pm**: Shared utilities - JSON response builders, `jsonrpc_response`/`jsonrpc_error`, OpenAPI spec generator, `sanitize_input()`, and the single `$VERSION` constant.
 
 ## Important Gotchas
@@ -133,13 +133,29 @@ See `/cron-scripts/` for the scripts. `financequote.cron` is installed in the co
 - `update-financedatabase` updates the FinanceDatabase python module at around midnight
 - 2 hours later, `import_financedatabase.py` refreshes the SQLite DB at `/tmp/finance_database.db` with proper file locking for concurrent access
 
+**IMPORTANT**: Each asset type has a DIFFERENT schema. The import script uses per-type `TABLE_SCHEMAS`:
+- **equities**: symbol, name, currency, sector, industry_group, industry, exchange, market, country, state, city, zipcode, website, market_cap, isin, cusip, figi, composite_figi, shareclass_figi, summary
+- **etfs/funds**: symbol, name, currency, summary, category_group, category, family, exchange, market
+- **indices**: symbol, name, currency, summary, category_group, category, exchange, market
+- **currencies**: symbol, name, summary, exchange, base_currency, quote_currency
+- **cryptos**: symbol, name, currency, summary, exchange, cryptocurrency
+- **moneymarkets**: symbol, name, currency, summary, family
+
+When adding new asset types or columns, update BOTH `TABLE_SCHEMAS` in `import_financedatabase.py` AND the corresponding `%TABLE_COLUMNS`, `%SEARCH_COLUMNS`, `%FILTER_COLUMNS`, `%SEARCH_RESULT_COLUMNS` in `FQDB.pm`.
+
 ### 7. Methods Are Case Insensitive
 
 The `%METHOD_MAP` hash (built once at startup in `app.psgi`) maps lowercase names to their canonical forms (e.g., `yahoojson` → `YahooJSON`). Use `_normalize_method()` for lookups.
 
-### 8. FQDB Table Names Are Whitelisted
+### 8. FQDB Table Names Are Whitelisted and Type-Aware
 
-FQDB uses a `%VALID_TABLES` whitelist. Any table name not in the whitelist is rejected. When adding new database tables, you must add them to `%VALID_TABLES` in FQDB.pm.
+FQDB uses a `%VALID_TABLES` whitelist. Any table name not in the whitelist is rejected. The query layer is fully type-aware:
+- `%TABLE_COLUMNS` defines what columns each type has
+- `%SEARCH_COLUMNS` defines which columns `search()` uses per type
+- `%SEARCH_RESULT_COLUMNS` defines which columns are returned in search results
+- `%FILTER_COLUMNS` defines which columns `filter()` and `get_filter_options()` use per type
+
+When adding new database tables, update `%VALID_TABLES` and ALL four column maps in FQDB.pm.
 
 ### 9. VERSION Is Centralized
 

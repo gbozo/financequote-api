@@ -128,6 +128,76 @@ Comprehensive MCP protocol enrichment: composite tools, discovery tools, resourc
 
 ---
 
+## v1.72 - FinanceDatabase Per-Type Schema Fix
+
+Fixed critical data import issue: the import script used a one-size-fits-all equities schema for all 7 asset types, silently dropping type-specific columns. Each upstream FinanceDatabase asset type has a different schema.
+
+### Data Loss Fixed
+
+| Asset Type | Columns Previously DROPPED | Now Correctly Imported |
+|---|---|---|
+| **Currencies** | `base_currency`, `quote_currency` | symbol, name, summary, exchange, base_currency, quote_currency |
+| **Cryptos** | `cryptocurrency` | symbol, name, currency, summary, exchange, cryptocurrency |
+| **ETFs** | `category_group`, `category`, `family` | symbol, name, currency, summary, category_group, category, family, exchange, market |
+| **Funds** | `category_group`, `category`, `family` | symbol, name, currency, summary, category_group, category, family, exchange, market |
+| **Indices** | `category_group`, `category` | symbol, name, currency, summary, category_group, category, exchange, market |
+| **Moneymarkets** | `family` | symbol, name, currency, summary, family |
+| **Equities** | *(none - was already correct)* | symbol, name, currency, sector, industry_group, industry, exchange, market, country, state, city, zipcode, website, market_cap, isin, cusip, figi, composite_figi, shareclass_figi, summary |
+
+### Import Script Rewrite (`import_financedatabase.py`)
+
+- [x] **Per-type `TABLE_SCHEMAS`** - Each asset type now has its own column list matching upstream FinanceDatabase source code.
+- [x] **Per-type `TABLE_INDEXES`** - Indexes on filterable/searchable columns per type (not one-size-fits-all).
+- [x] **Drop+recreate tables** on each import to handle schema changes cleanly.
+- [x] **NaN handling** - Explicit NaN-to-None conversion (was silently passing through).
+- [x] **Schema version metadata** - `schema_version: 2` tracked in metadata table.
+- [x] **Logging improvements** - Reports missing/extra columns vs schema for each type.
+
+### Type-Aware Query Layer (`FQDB.pm`)
+
+- [x] **`%TABLE_COLUMNS`** - Per-type column definitions matching import schemas.
+- [x] **`%SEARCH_COLUMNS`** - Type-appropriate search targets:
+  - equities: symbol, name, isin
+  - etfs/funds: symbol, name, category, family
+  - currencies: symbol, name, base_currency, quote_currency
+  - cryptos: symbol, name, cryptocurrency
+- [x] **`%SEARCH_RESULT_COLUMNS`** - Type-appropriate result fields (e.g., currencies return base_currency/quote_currency, not sector/country).
+- [x] **`%FILTER_COLUMNS`** - Type-appropriate filter parameters:
+  - equities: sector, country, exchange, market_cap, industry, industry_group, currency, market
+  - etfs/funds: category_group, category, family, exchange, currency, market
+  - currencies: base_currency, quote_currency, exchange
+  - cryptos: cryptocurrency, currency, exchange
+  - moneymarkets: currency, family
+- [x] **`filter()` dynamic dispatch** - Accepts any filter param valid for the given type, rejects invalid ones.
+- [x] **`get_filter_options()` per-type** - Returns only the filter columns that exist for the given type.
+- [x] **`asset_types()` includes filters** - Each type now reports its available filter columns.
+- [x] **`get_columns()` / `get_filter_columns()`** - New accessor functions for type introspection.
+
+### MCP Tool Updates (`FQMCP.pm`)
+
+- [x] **`filter_assets` tool** - Now accepts ALL type-specific filter params (category_group, category, family, base_currency, quote_currency, cryptocurrency) and forwards them dynamically to FQDB.
+- [x] **`filter_assets` description** - Documents which filters apply to which types.
+- [x] **`get_filter_options` description** - Explains per-type filter behavior with examples.
+- [x] **`search_assets` description** - Documents type-aware search columns.
+- [x] **`get_asset_types` description** - Notes that filter columns are included per type.
+- [x] **`lookup_symbol` description** - Notes type-specific return fields.
+- [x] **`market_screener` prompt** - Updated to guide agents through type-aware filtering.
+
+### Documentation
+
+- [x] **AGENTS.md** - Updated FQDB module description, gotcha #6 (per-type schemas), gotcha #8 (type-aware queries with all 4 column maps).
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `cron-scripts/import_financedatabase.py` | Complete rewrite: per-type TABLE_SCHEMAS, TABLE_INDEXES, drop+recreate, NaN handling |
+| `app/lib/FQDB.pm` | Type-aware queries: TABLE_COLUMNS, SEARCH_COLUMNS, SEARCH_RESULT_COLUMNS, FILTER_COLUMNS |
+| `app/lib/FQMCP.pm` | Updated filter_assets to accept all type-specific params, enriched descriptions |
+| `AGENTS.md` | Per-type schema docs, type-aware query docs |
+
+---
+
 ## Previous Tasks (v1.0 - v1.69)
 
 ### Core Infrastructure
